@@ -38,7 +38,7 @@ $ cmake -G Ninja ../llvm \
     -DCMAKE_BUILD_TYPE=RELEASE \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
     -DPython3_EXECUTABLE=$(which python3)
-$ ninja check-clang check-mlir omp
+$ ninja check-clang check-mlir check-openmp
 $ export BUILD_LOCAL_LLVM_DIR=$PWD
 ```
 
@@ -60,6 +60,7 @@ $ ninja
 $ ninja check-buddy
 $ export BUILD_RISCV_GNU_TOOLCHAIN_DIR=$PWD/thirdparty/riscv-gnu-toolchain/
 $ export RISCV_GNU_TOOLCHAIN_SYSROOT_DIR=${BUILD_RISCV_GNU_TOOLCHAIN_DIR}/sysroot/
+$ export QEMU_LD_PREFIX=${RISCV_GNU_TOOLCHAIN_SYSROOT_DIR}
 ```
 
 3. Build Cross-Compiled Clang
