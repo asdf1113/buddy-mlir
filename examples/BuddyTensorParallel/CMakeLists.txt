@@ -83,7 +83,7 @@ endif()
 # Platform-specific config
 # ==============================================================================
 if(CROSS_COMPILE_RVV)
-    set(OPENMP_NUM_THREADS "num-threads=32")
+    set(OPENMP_NUM_THREADS "num-threads=8")
     set(LLC_TARGET_FLAGS
         -mtriple=riscv64-unknown-linux-gnu
         -target-abi=lp64d
@@ -301,8 +301,12 @@ set(FORWARD_PASSES
     -one-shot-bufferize=${BUFFERIZE_SIMPLE_OPTS}
     -expand-strided-metadata
     -ownership-based-buffer-deallocation
+    -canonicalize
     -buffer-deallocation-simplification
     -bufferization-lower-deallocations
+    -cse
+    -canonicalize
+    -optimize-allocation-liveness
     -matmul-vectorization-blis
     -batchmatmul-optimize
     -convert-linalg-to-affine-loops
@@ -310,7 +314,6 @@ set(FORWARD_PASSES
     -convert-vector-to-scf
     -lower-affine
     -convert-scf-to-openmp=${OPENMP_NUM_THREADS}
-    -cse
     -memref-expand
     -arith-expand
     -convert-vector-to-llvm
@@ -318,7 +321,6 @@ set(FORWARD_PASSES
     -finalize-memref-to-llvm
     -convert-scf-to-cf
     -convert-cf-to-llvm
-    -convert-ub-to-llvm
     -llvm-request-c-wrappers
     -convert-openmp-to-llvm
     -convert-arith-to-llvm
@@ -335,8 +337,12 @@ set(SUBGRAPH_PASSES
     -one-shot-bufferize=${BUFFERIZE_SIMPLE_OPTS}
     -expand-strided-metadata
     -ownership-based-buffer-deallocation
+    -canonicalize
     -buffer-deallocation-simplification
     -bufferization-lower-deallocations
+    -cse
+    -canonicalize
+    -optimize-allocation-liveness
     -matmul-vectorization-blis
     -batchmatmul-optimize
     -batchmatmul-transpose-b-vectorization
@@ -344,7 +350,7 @@ set(SUBGRAPH_PASSES
     -affine-parallelize
     -convert-vector-to-scf
     -lower-affine
-    -convert-scf-to-openmp=${OPENMP_NUM_THREADS}
+    -convert-scf-to-openmp=num-threads=48
     -cse
     -memref-expand
     -arith-expand
@@ -353,7 +359,6 @@ set(SUBGRAPH_PASSES
     -finalize-memref-to-llvm
     -convert-scf-to-cf
     -convert-cf-to-llvm
-    -convert-ub-to-llvm
     -llvm-request-c-wrappers
     -convert-openmp-to-llvm
     -convert-arith-to-llvm
@@ -370,11 +375,15 @@ set(SUBGRAPH_DECODE_PASSES
     -one-shot-bufferize=${BUFFERIZE_SIMPLE_OPTS}
     -expand-strided-metadata
     -ownership-based-buffer-deallocation
+    -canonicalize
     -buffer-deallocation-simplification
     -bufferization-lower-deallocations
+    -cse
+    -canonicalize
+    -optimize-allocation-liveness
     -assume-tight-memref-layout
     -staticize-memref-layout
-    -matmul-vectorization-decode=vector-size=128
+    -matmul-vectorization-decode=vector-size=32
     -batch-matmul-vectorization-decode=vector-size=128
     -batchmatmul-transpose-b-vectorization=vector-size=16
     -convert-linalg-to-affine-loops
@@ -389,7 +398,6 @@ set(SUBGRAPH_DECODE_PASSES
     -finalize-memref-to-llvm
     -convert-scf-to-cf
     -convert-cf-to-llvm
-    -convert-ub-to-llvm
     -llvm-request-c-wrappers
     -convert-openmp-to-llvm
     -convert-arith-to-llvm

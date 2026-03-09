@@ -494,9 +494,9 @@ int main(int argc, char *argv[]) {
 
     MPI_Irecv(mhaMemRef4DPtr, MaxTokenLength * MaxTokenLength, MPI_INT8_T,
               source, 1, MPI_COMM_WORLD, &mha_recv_req[0]);
-    MPI_Irecv(mhaMemRef3D1Ptr, MaxTokenLength * HiddenSize0, MPI_FLOAT, source,
+    MPI_Irecv(mhaMemRef3D1Ptr, MaxTokenLength * HiddenSize, MPI_FLOAT, source,
               2, MPI_COMM_WORLD, &mha_recv_req[1]);
-    MPI_Irecv(mhaMemRef3D2Ptr, MaxTokenLength * HiddenSize0, MPI_FLOAT, source,
+    MPI_Irecv(mhaMemRef3D2Ptr, MaxTokenLength * HiddenSize, MPI_FLOAT, source,
               3, MPI_COMM_WORLD, &mha_recv_req[2]);
 
     MPI_Irecv(subResultPtr, subSize, MPI_FLOAT, source, 0, MPI_COMM_WORLD,
@@ -638,6 +638,7 @@ int main(int argc, char *argv[]) {
     MemRef<float, 2> mhaDataDecode0({1, HiddenSize0});
     MemRefContainer2 kvDecodeContainer0(kv0[0], kv0[1], tmp2DContainerDecode);
     MemRefContainer2 *kvDecodeContainerPtr0 = &kvDecodeContainer0;
+    std::cout << "Starting decoding..." << std::endl;
 
     for (int i = 1; i <= generateLen; i++) {
       MPI_Irecv(mhaMemRef4DPtrDecode, MaxTokenLength, MPI_INT8_T, source, 1,
@@ -651,27 +652,39 @@ int main(int argc, char *argv[]) {
       MPI_Irecv(subResultPtrDecode, HiddenSize0, MPI_FLOAT, source, 0,
                 MPI_COMM_WORLD, &recv_req[0]);
 
+      std::cout << "Waiting for data for decoding iteration " << i << "..."
+                << std::endl;
+
       MPI_Wait(&recv_req[0], MPI_STATUS_IGNORE);
       for (int m = 0; m < times; m++) {
 
         _mlir_ciface_forward_decode1(&sub3DContainerDecode,
                                      &paramsContainersRMS[m],
                                      &subResultContainerDecode);
+        std::cout << "completed RMS " << m << std::endl;
 
         if (m == 0) {
           MPI_Waitall(4, mha_recv_decode, MPI_STATUSES_IGNORE);
         }
+        std::cout << "received MHA params and data for decoding iteration " << m
+                  << std::endl;
+        MemRefContainer2 kvDecodeContainer(kv0[2 * m], kv0[2 * m + 1],
+                                           tmp2DContainerDecode);
         _mlir_ciface_forward_decode2(
             kvDecodeContainerPtr0, &paramsContainersMHA[m], &cachePosition,
             &kv0[2 * m], &kv0[2 * m + 1], &mhaMemRef4DDecode,
             &mhaMemRef3D1Decode, &mhaMemRef3D2Decode, &sub3DContainerDecode);
+        std::cout << "completed MHA " << m << std::endl;
         kv0[2 * m] = kvDecodeContainerPtr0->kcache;
         kv0[2 * m + 1] = kvDecodeContainerPtr0->vcache;
+        // kv0[2 * m] = kvDecodeContainer.kcache;
+        // kv0[2 * m + 1] = kvDecodeContainer.vcache;
         tmp2DContainerDecode = kvDecodeContainerPtr0->data;
 
         // ----- Reduce-Scatter  -----
         mhaOutputPtrDecode = tmp2DContainerDecode.getData();
-
+        std::cout << "Performing Reduce-Scatter for decoding iteration " << m
+                  << "..." << std::endl;
         if (comm_sub != MPI_COMM_NULL) {
           MPI_Allreduce(mhaOutputPtrDecode, sub2DContainerDecode.getData(),
                         HiddenSize0, MPI_FLOAT, MPI_SUM, comm_sub);
@@ -679,14 +692,17 @@ int main(int argc, char *argv[]) {
         _mlir_ciface_forward_decode3(&subResultContainerDecode,
                                      &subResultContainerDecode,
                                      &sub2DContainerDecode);
+        std::cout << "completed Reduce-Scatter " << m << std::endl;
         _mlir_ciface_forward_decode1(&sub3DContainerDecode,
                                      &paramsContainersRMS0[m],
                                      &subResultContainerDecode);
+        std::cout << "completed RMS0 " << m << std::endl;
 
         _mlir_ciface_forward_decode5(&tmp2DContainerDecode,
                                      &paramsContainersMLP[m],
                                      &sub3DContainerDecode);
         mhaOutputPtrDecode = tmp2DContainerDecode.getData();
+        std::cout << "completed MLP " << m << std::endl;
         if (comm_sub != MPI_COMM_NULL) {
 
           MPI_Allreduce(mhaOutputPtrDecode, sub2DContainerDecode.getData(),
@@ -695,6 +711,7 @@ int main(int argc, char *argv[]) {
         _mlir_ciface_forward_decode3(&subResultContainerDecode,
                                      &subResultContainerDecode,
                                      &sub2DContainerDecode);
+        std::cout << "completed decode prefill3 " << m << std::endl;
         if (m == (times - 1)) {
           subResultPtrDecode = subResultContainerDecode.getData();
           if (rank == 1) {
