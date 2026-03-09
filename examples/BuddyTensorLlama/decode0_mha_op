@@ -1,0 +1,653 @@
+GraphDriver: Performing vertical split...
+====================Graph Node====================
+Node: arg69_1
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: ['mm']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: arg70_1
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: ['mm_1']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: arg71_1
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: ['mm_2']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: arg72_1
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: ['mm_3']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: arg66_1
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: []
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: arg0_1
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: ['index_put']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: arg1_1
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: ['index_put_1']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: expand_1
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: ['slice_8']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: mul
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: ['unsqueeze_5']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: mul_1
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: ['unsqueeze_6']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: mul_3
+Type: OpType.PlaceholderType
+Arguments: []
+Parents: []
+Children: ['view_5', 'view_8', 'view_11']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: view_5
+Type: OpType.ReshapeType
+Arguments: ['mul_3', [1, 4096]]
+Parents: ['mul_3']
+Children: ['mm']
+--------------------MLIR OPS--------------------
+%0 = "tosa.const_shape"() <{values = dense<[1, 4096]> : tensor<2xindex>}> : () -> !tosa.shape<2>
+%1 = "tosa.reshape"(%arg10, %0) : (tensor<1x1x4096xf32>, !tosa.shape<2>) -> tensor<1x4096xf32>
+
+====================Graph Node====================
+Node: mm
+Type: OpType.ReduceType
+Arguments: ['view_5', 'arg69_1']
+Parents: ['view_5', 'arg69_1']
+Children: ['view_6']
+--------------------MLIR OPS--------------------
+%2 = "arith.constant"() <{value = dense<0.000000e+00> : tensor<1x4096xf32>}> : () -> tensor<1x4096xf32>
+%3 = "linalg.matmul"(%1, %arg0, %2) <{cast = #linalg.type_fn<cast_signed>, indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>, affine_map<(d0, d1, d2) -> (d0, d1)>], operandSegmentSizes = array<i32: 2, 1>}> ({
+^bb0(%arg11: f32, %arg12: f32, %arg13: f32):
+  %4 = "arith.mulf"(%arg11, %arg12) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+  %5 = "arith.addf"(%arg13, %4) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+  "linalg.yield"(%5) : (f32) -> ()
+}) : (tensor<1x4096xf32>, tensor<4096x4096xf32>, tensor<1x4096xf32>) -> tensor<1x4096xf32>
+
+====================Graph Node====================
+Node: view_6
+Type: OpType.ReshapeType
+Arguments: ['mm', [1, 1, 4096]]
+Parents: ['mm']
+Children: ['view_7']
+--------------------MLIR OPS--------------------
+%4 = "tosa.const_shape"() <{values = dense<[1, 1, 4096]> : tensor<3xindex>}> : () -> !tosa.shape<3>
+%5 = "tosa.reshape"(%3, %4) : (tensor<1x4096xf32>, !tosa.shape<3>) -> tensor<1x1x4096xf32>
+
+====================Graph Node====================
+Node: view_7
+Type: OpType.ReshapeType
+Arguments: ['view_6', [1, 1, -1, 128]]
+Parents: ['view_6']
+Children: ['permute_2_reshaped']
+--------------------MLIR OPS--------------------
+%6 = "tosa.const_shape"() <{values = dense<[1, 1, 32, 128]> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%7 = "tosa.reshape"(%5, %6) : (tensor<1x1x4096xf32>, !tosa.shape<4>) -> tensor<1x1x32x128xf32>
+
+====================Graph Node====================
+Node: permute_2_reshaped
+Type: OpType.ReshapeType
+Arguments: ['view_7', [1, 32, 1, 128]]
+Parents: ['view_7']
+Children: ['mul_4', 'slice_4', 'slice_5']
+--------------------MLIR OPS--------------------
+%8 = "tosa.const_shape"() <{values = dense<[1, 32, 1, 128]> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%9 = "tosa.reshape"(%7, %8) : (tensor<1x1x32x128xf32>, !tosa.shape<4>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: view_8
+Type: OpType.ReshapeType
+Arguments: ['mul_3', [1, 4096]]
+Parents: ['mul_3']
+Children: ['mm_1']
+--------------------MLIR OPS--------------------
+%10 = "tosa.const_shape"() <{values = dense<[1, 4096]> : tensor<2xindex>}> : () -> !tosa.shape<2>
+%11 = "tosa.reshape"(%arg10, %10) : (tensor<1x1x4096xf32>, !tosa.shape<2>) -> tensor<1x4096xf32>
+
+====================Graph Node====================
+Node: mm_1
+Type: OpType.ReduceType
+Arguments: ['view_8', 'arg70_1']
+Parents: ['view_8', 'arg70_1']
+Children: ['view_9']
+--------------------MLIR OPS--------------------
+%12 = "arith.constant"() <{value = dense<0.000000e+00> : tensor<1x4096xf32>}> : () -> tensor<1x4096xf32>
+%13 = "linalg.matmul"(%11, %arg1, %12) <{cast = #linalg.type_fn<cast_signed>, indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>, affine_map<(d0, d1, d2) -> (d0, d1)>], operandSegmentSizes = array<i32: 2, 1>}> ({
+^bb0(%arg11: f32, %arg12: f32, %arg13: f32):
+  %14 = "arith.mulf"(%arg11, %arg12) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+  %15 = "arith.addf"(%arg13, %14) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+  "linalg.yield"(%15) : (f32) -> ()
+}) : (tensor<1x4096xf32>, tensor<4096x4096xf32>, tensor<1x4096xf32>) -> tensor<1x4096xf32>
+
+====================Graph Node====================
+Node: view_9
+Type: OpType.ReshapeType
+Arguments: ['mm_1', [1, 1, 4096]]
+Parents: ['mm_1']
+Children: ['view_10']
+--------------------MLIR OPS--------------------
+%14 = "tosa.const_shape"() <{values = dense<[1, 1, 4096]> : tensor<3xindex>}> : () -> !tosa.shape<3>
+%15 = "tosa.reshape"(%13, %14) : (tensor<1x4096xf32>, !tosa.shape<3>) -> tensor<1x1x4096xf32>
+
+====================Graph Node====================
+Node: view_10
+Type: OpType.ReshapeType
+Arguments: ['view_9', [1, 1, -1, 128]]
+Parents: ['view_9']
+Children: ['permute_4_reshaped']
+--------------------MLIR OPS--------------------
+%16 = "tosa.const_shape"() <{values = dense<[1, 1, 32, 128]> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%17 = "tosa.reshape"(%15, %16) : (tensor<1x1x4096xf32>, !tosa.shape<4>) -> tensor<1x1x32x128xf32>
+
+====================Graph Node====================
+Node: permute_4_reshaped
+Type: OpType.ReshapeType
+Arguments: ['view_10', [1, 32, 1, 128]]
+Parents: ['view_10']
+Children: ['mul_6', 'slice_6', 'slice_7']
+--------------------MLIR OPS--------------------
+%18 = "tosa.const_shape"() <{values = dense<[1, 32, 1, 128]> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%19 = "tosa.reshape"(%17, %18) : (tensor<1x1x32x128xf32>, !tosa.shape<4>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: view_11
+Type: OpType.ReshapeType
+Arguments: ['mul_3', [1, 4096]]
+Parents: ['mul_3']
+Children: ['mm_2']
+--------------------MLIR OPS--------------------
+%20 = "tosa.const_shape"() <{values = dense<[1, 4096]> : tensor<2xindex>}> : () -> !tosa.shape<2>
+%21 = "tosa.reshape"(%arg10, %20) : (tensor<1x1x4096xf32>, !tosa.shape<2>) -> tensor<1x4096xf32>
+
+====================Graph Node====================
+Node: mm_2
+Type: OpType.ReduceType
+Arguments: ['view_11', 'arg71_1']
+Parents: ['view_11', 'arg71_1']
+Children: ['view_12']
+--------------------MLIR OPS--------------------
+%22 = "arith.constant"() <{value = dense<0.000000e+00> : tensor<1x4096xf32>}> : () -> tensor<1x4096xf32>
+%23 = "linalg.matmul"(%21, %arg2, %22) <{cast = #linalg.type_fn<cast_signed>, indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>, affine_map<(d0, d1, d2) -> (d0, d1)>], operandSegmentSizes = array<i32: 2, 1>}> ({
+^bb0(%arg11: f32, %arg12: f32, %arg13: f32):
+  %24 = "arith.mulf"(%arg11, %arg12) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+  %25 = "arith.addf"(%arg13, %24) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+  "linalg.yield"(%25) : (f32) -> ()
+}) : (tensor<1x4096xf32>, tensor<4096x4096xf32>, tensor<1x4096xf32>) -> tensor<1x4096xf32>
+
+====================Graph Node====================
+Node: view_12
+Type: OpType.ReshapeType
+Arguments: ['mm_2', [1, 1, 4096]]
+Parents: ['mm_2']
+Children: ['view_13']
+--------------------MLIR OPS--------------------
+%24 = "tosa.const_shape"() <{values = dense<[1, 1, 4096]> : tensor<3xindex>}> : () -> !tosa.shape<3>
+%25 = "tosa.reshape"(%23, %24) : (tensor<1x4096xf32>, !tosa.shape<3>) -> tensor<1x1x4096xf32>
+
+====================Graph Node====================
+Node: view_13
+Type: OpType.ReshapeType
+Arguments: ['view_12', [1, 1, -1, 128]]
+Parents: ['view_12']
+Children: ['permute_6_reshaped']
+--------------------MLIR OPS--------------------
+%26 = "tosa.const_shape"() <{values = dense<[1, 1, 32, 128]> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%27 = "tosa.reshape"(%25, %26) : (tensor<1x1x4096xf32>, !tosa.shape<4>) -> tensor<1x1x32x128xf32>
+
+====================Graph Node====================
+Node: permute_6_reshaped
+Type: OpType.ReshapeType
+Arguments: ['view_13', [1, 32, 1, 128]]
+Parents: ['view_13']
+Children: ['index_put_1']
+--------------------MLIR OPS--------------------
+%28 = "tosa.const_shape"() <{values = dense<[1, 32, 1, 128]> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%29 = "tosa.reshape"(%27, %28) : (tensor<1x1x32x128xf32>, !tosa.shape<4>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: unsqueeze_5
+Type: OpType.ReshapeType
+Arguments: ['mul', 1]
+Parents: ['mul']
+Children: ['mul_4', 'mul_6']
+--------------------MLIR OPS--------------------
+%30 = "tosa.const_shape"() <{values = dense<[1, 1, 1, 128]> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%31 = "tosa.reshape"(%arg8, %30) : (tensor<1x1x128xf32>, !tosa.shape<4>) -> tensor<1x1x1x128xf32>
+
+====================Graph Node====================
+Node: unsqueeze_6
+Type: OpType.ReshapeType
+Arguments: ['mul_1', 1]
+Parents: ['mul_1']
+Children: ['mul_5', 'mul_7']
+--------------------MLIR OPS--------------------
+%32 = "tosa.const_shape"() <{values = dense<[1, 1, 1, 128]> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%33 = "tosa.reshape"(%arg9, %32) : (tensor<1x1x128xf32>, !tosa.shape<4>) -> tensor<1x1x1x128xf32>
+
+====================Graph Node====================
+Node: mul_4
+Type: OpType.BroadcastType
+Arguments: ['permute_2_reshaped', 'unsqueeze_5']
+Parents: ['permute_2_reshaped', 'unsqueeze_5']
+Children: ['add_2']
+--------------------MLIR OPS--------------------
+%34 = "tosa.const"() <{values = dense<0> : tensor<1xi8>}> : () -> tensor<1xi8>
+%35 = "tosa.mul"(%9, %31, %34) : (tensor<1x32x1x128xf32>, tensor<1x1x1x128xf32>, tensor<1xi8>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: slice_4
+Type: OpType.ReshapeType
+Arguments: ['permute_2_reshaped', 3, 0, 64]
+Parents: ['permute_2_reshaped']
+Children: ['cat']
+--------------------MLIR OPS--------------------
+%36 = "tensor.extract_slice"(%9) <{operandSegmentSizes = array<i32: 1, 0, 0, 0>, static_offsets = array<i64: 0, 0, 0, 0>, static_sizes = array<i64: 1, 32, 1, 64>, static_strides = array<i64: 1, 1, 1, 1>}> : (tensor<1x32x1x128xf32>) -> tensor<1x32x1x64xf32>
+
+====================Graph Node====================
+Node: slice_5
+Type: OpType.ReshapeType
+Arguments: ['permute_2_reshaped', 3, 64, 9223372036854775807]
+Parents: ['permute_2_reshaped']
+Children: ['neg']
+--------------------MLIR OPS--------------------
+%37 = "tensor.extract_slice"(%9) <{operandSegmentSizes = array<i32: 1, 0, 0, 0>, static_offsets = array<i64: 0, 0, 0, 64>, static_sizes = array<i64: 1, 32, 1, 64>, static_strides = array<i64: 1, 1, 1, 1>}> : (tensor<1x32x1x128xf32>) -> tensor<1x32x1x64xf32>
+
+====================Graph Node====================
+Node: neg
+Type: OpType.ElementwiseType
+Arguments: ['slice_5']
+Parents: ['slice_5']
+Children: ['cat']
+--------------------MLIR OPS--------------------
+%38 = "tosa.const"() <{values = dense<0.000000e+00> : tensor<1xf32>}> : () -> tensor<1xf32>
+%39 = "tosa.const"() <{values = dense<0.000000e+00> : tensor<1xf32>}> : () -> tensor<1xf32>
+%40 = "tosa.negate"(%37, %38, %39) : (tensor<1x32x1x64xf32>, tensor<1xf32>, tensor<1xf32>) -> tensor<1x32x1x64xf32>
+
+====================Graph Node====================
+Node: cat
+Type: OpType.ConcatType
+Arguments: [[neg, slice_4], -1]
+Parents: []
+Children: ['mul_5']
+--------------------MLIR OPS--------------------
+%41 = "tensor.empty"() : () -> tensor<1x32x1x128xf32>
+%42 = "tensor.insert_slice"(%40, %41) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>, static_offsets = array<i64: 0, 0, 0, 0>, static_sizes = array<i64: 1, 32, 1, 64>, static_strides = array<i64: 1, 1, 1, 1>}> : (tensor<1x32x1x64xf32>, tensor<1x32x1x128xf32>) -> tensor<1x32x1x128xf32>
+%43 = "tensor.insert_slice"(%36, %42) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>, static_offsets = array<i64: 0, 0, 0, 64>, static_sizes = array<i64: 1, 32, 1, 64>, static_strides = array<i64: 1, 1, 1, 1>}> : (tensor<1x32x1x64xf32>, tensor<1x32x1x128xf32>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: mul_5
+Type: OpType.BroadcastType
+Arguments: ['cat', 'unsqueeze_6']
+Parents: ['cat', 'unsqueeze_6']
+Children: ['add_2']
+--------------------MLIR OPS--------------------
+%44 = "tosa.const"() <{values = dense<0> : tensor<1xi8>}> : () -> tensor<1xi8>
+%45 = "tosa.mul"(%43, %33, %44) : (tensor<1x32x1x128xf32>, tensor<1x1x1x128xf32>, tensor<1xi8>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: add_2
+Type: OpType.BroadcastType
+Arguments: ['mul_4', 'mul_5']
+Parents: ['mul_4', 'mul_5']
+Children: ['_scaled_dot_product_flash_attention_for_cpu']
+--------------------MLIR OPS--------------------
+%46 = "tosa.add"(%35, %45) : (tensor<1x32x1x128xf32>, tensor<1x32x1x128xf32>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: mul_6
+Type: OpType.BroadcastType
+Arguments: ['permute_4_reshaped', 'unsqueeze_5']
+Parents: ['permute_4_reshaped', 'unsqueeze_5']
+Children: ['add_3']
+--------------------MLIR OPS--------------------
+%47 = "tosa.const"() <{values = dense<0> : tensor<1xi8>}> : () -> tensor<1xi8>
+%48 = "tosa.mul"(%19, %31, %47) : (tensor<1x32x1x128xf32>, tensor<1x1x1x128xf32>, tensor<1xi8>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: slice_6
+Type: OpType.ReshapeType
+Arguments: ['permute_4_reshaped', 3, 0, 64]
+Parents: ['permute_4_reshaped']
+Children: ['cat_1']
+--------------------MLIR OPS--------------------
+%49 = "tensor.extract_slice"(%19) <{operandSegmentSizes = array<i32: 1, 0, 0, 0>, static_offsets = array<i64: 0, 0, 0, 0>, static_sizes = array<i64: 1, 32, 1, 64>, static_strides = array<i64: 1, 1, 1, 1>}> : (tensor<1x32x1x128xf32>) -> tensor<1x32x1x64xf32>
+
+====================Graph Node====================
+Node: slice_7
+Type: OpType.ReshapeType
+Arguments: ['permute_4_reshaped', 3, 64, 9223372036854775807]
+Parents: ['permute_4_reshaped']
+Children: ['neg_1']
+--------------------MLIR OPS--------------------
+%50 = "tensor.extract_slice"(%19) <{operandSegmentSizes = array<i32: 1, 0, 0, 0>, static_offsets = array<i64: 0, 0, 0, 64>, static_sizes = array<i64: 1, 32, 1, 64>, static_strides = array<i64: 1, 1, 1, 1>}> : (tensor<1x32x1x128xf32>) -> tensor<1x32x1x64xf32>
+
+====================Graph Node====================
+Node: neg_1
+Type: OpType.ElementwiseType
+Arguments: ['slice_7']
+Parents: ['slice_7']
+Children: ['cat_1']
+--------------------MLIR OPS--------------------
+%51 = "tosa.const"() <{values = dense<0.000000e+00> : tensor<1xf32>}> : () -> tensor<1xf32>
+%52 = "tosa.const"() <{values = dense<0.000000e+00> : tensor<1xf32>}> : () -> tensor<1xf32>
+%53 = "tosa.negate"(%50, %51, %52) : (tensor<1x32x1x64xf32>, tensor<1xf32>, tensor<1xf32>) -> tensor<1x32x1x64xf32>
+
+====================Graph Node====================
+Node: cat_1
+Type: OpType.ConcatType
+Arguments: [[neg_1, slice_6], -1]
+Parents: []
+Children: ['mul_7']
+--------------------MLIR OPS--------------------
+%54 = "tensor.empty"() : () -> tensor<1x32x1x128xf32>
+%55 = "tensor.insert_slice"(%53, %54) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>, static_offsets = array<i64: 0, 0, 0, 0>, static_sizes = array<i64: 1, 32, 1, 64>, static_strides = array<i64: 1, 1, 1, 1>}> : (tensor<1x32x1x64xf32>, tensor<1x32x1x128xf32>) -> tensor<1x32x1x128xf32>
+%56 = "tensor.insert_slice"(%49, %55) <{operandSegmentSizes = array<i32: 1, 1, 0, 0, 0>, static_offsets = array<i64: 0, 0, 0, 64>, static_sizes = array<i64: 1, 32, 1, 64>, static_strides = array<i64: 1, 1, 1, 1>}> : (tensor<1x32x1x64xf32>, tensor<1x32x1x128xf32>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: mul_7
+Type: OpType.BroadcastType
+Arguments: ['cat_1', 'unsqueeze_6']
+Parents: ['cat_1', 'unsqueeze_6']
+Children: ['add_3']
+--------------------MLIR OPS--------------------
+%57 = "tosa.const"() <{values = dense<0> : tensor<1xi8>}> : () -> tensor<1xi8>
+%58 = "tosa.mul"(%56, %33, %57) : (tensor<1x32x1x128xf32>, tensor<1x1x1x128xf32>, tensor<1xi8>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: add_3
+Type: OpType.BroadcastType
+Arguments: ['mul_6', 'mul_7']
+Parents: ['mul_6', 'mul_7']
+Children: ['index_put']
+--------------------MLIR OPS--------------------
+%59 = "tosa.add"(%48, %58) : (tensor<1x32x1x128xf32>, tensor<1x32x1x128xf32>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: index_put
+Type: OpType.ElementwiseType
+Arguments: ['arg0_1', [None, None, arg66_1], 'add_3']
+Parents: ['arg0_1', 'add_3']
+Children: ['_scaled_dot_product_flash_attention_for_cpu', 'output']
+--------------------MLIR OPS--------------------
+%60 = "bufferization.to_buffer"(%arg5) : (tensor<1x32x1024x128xf32>) -> memref<1x32x1024x128xf32>
+%61 = "tosa.const_shape"() <{values = dense<1> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%62 = "tosa.reshape"(%arg4, %61) : (tensor<1xi64>, !tosa.shape<4>) -> tensor<1x1x1x1xi64>
+%63 = "tosa.const"() <{values = dense<0> : tensor<1x32x1x128xi64>}> : () -> tensor<1x32x1x128xi64>
+%64 = "tosa.add"(%62, %63) : (tensor<1x1x1x1xi64>, tensor<1x32x1x128xi64>) -> tensor<1x32x1x128xi64>
+%65 = "bufferization.to_buffer"(%64) : (tensor<1x32x1x128xi64>) -> memref<1x32x1x128xi64>
+%66 = "bufferization.to_buffer"(%59) : (tensor<1x32x1x128xf32>) -> memref<1x32x1x128xf32>
+%67 = "arith.constant"() <{value = 0 : index}> : () -> index
+%68 = "arith.constant"() <{value = 1 : index}> : () -> index
+%69 = "arith.constant"() <{value = 1 : index}> : () -> index
+%70 = "arith.constant"() <{value = 32 : index}> : () -> index
+%71 = "arith.constant"() <{value = 1 : index}> : () -> index
+%72 = "arith.constant"() <{value = 128 : index}> : () -> index
+"scf.for"(%67, %69, %68) ({
+^bb0(%arg11: index):
+  "scf.for"(%67, %70, %68) ({
+  ^bb0(%arg12: index):
+    "scf.for"(%67, %71, %68) ({
+    ^bb0(%arg13: index):
+      "scf.for"(%67, %72, %68) ({
+      ^bb0(%arg14: index):
+        %74 = "memref.load"(%66, %arg11, %arg12, %arg13, %arg14) : (memref<1x32x1x128xf32>, index, index, index, index) -> f32
+        %75 = "memref.load"(%65, %arg11, %arg12, %arg13, %arg14) : (memref<1x32x1x128xi64>, index, index, index, index) -> i64
+        %76 = "arith.index_cast"(%75) : (i64) -> index
+        "memref.store"(%74, %60, %arg11, %arg12, %76, %arg14) : (f32, memref<1x32x1024x128xf32>, index, index, index, index) -> ()
+        "scf.yield"() : () -> ()
+      }) : (index, index, index) -> ()
+      "scf.yield"() : () -> ()
+    }) : (index, index, index) -> ()
+    "scf.yield"() : () -> ()
+  }) : (index, index, index) -> ()
+  "scf.yield"() : () -> ()
+}) : (index, index, index) -> ()
+%73 = "bufferization.to_tensor"(%60) <{restrict}> : (memref<1x32x1024x128xf32>) -> tensor<1x32x1024x128xf32>
+
+====================Graph Node====================
+Node: index_put_1
+Type: OpType.ElementwiseType
+Arguments: ['arg1_1', [None, None, arg66_1], 'permute_6_reshaped']
+Parents: ['arg1_1', 'permute_6_reshaped']
+Children: ['_scaled_dot_product_flash_attention_for_cpu', 'output']
+--------------------MLIR OPS--------------------
+%74 = "bufferization.to_buffer"(%arg6) : (tensor<1x32x1024x128xf32>) -> memref<1x32x1024x128xf32>
+%75 = "tosa.const_shape"() <{values = dense<1> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%76 = "tosa.reshape"(%arg4, %75) : (tensor<1xi64>, !tosa.shape<4>) -> tensor<1x1x1x1xi64>
+%77 = "tosa.const"() <{values = dense<0> : tensor<1x32x1x128xi64>}> : () -> tensor<1x32x1x128xi64>
+%78 = "tosa.add"(%76, %77) : (tensor<1x1x1x1xi64>, tensor<1x32x1x128xi64>) -> tensor<1x32x1x128xi64>
+%79 = "bufferization.to_buffer"(%78) : (tensor<1x32x1x128xi64>) -> memref<1x32x1x128xi64>
+%80 = "bufferization.to_buffer"(%29) : (tensor<1x32x1x128xf32>) -> memref<1x32x1x128xf32>
+%81 = "arith.constant"() <{value = 0 : index}> : () -> index
+%82 = "arith.constant"() <{value = 1 : index}> : () -> index
+%83 = "arith.constant"() <{value = 1 : index}> : () -> index
+%84 = "arith.constant"() <{value = 32 : index}> : () -> index
+%85 = "arith.constant"() <{value = 1 : index}> : () -> index
+%86 = "arith.constant"() <{value = 128 : index}> : () -> index
+"scf.for"(%81, %83, %82) ({
+^bb0(%arg11: index):
+  "scf.for"(%81, %84, %82) ({
+  ^bb0(%arg12: index):
+    "scf.for"(%81, %85, %82) ({
+    ^bb0(%arg13: index):
+      "scf.for"(%81, %86, %82) ({
+      ^bb0(%arg14: index):
+        %88 = "memref.load"(%80, %arg11, %arg12, %arg13, %arg14) : (memref<1x32x1x128xf32>, index, index, index, index) -> f32
+        %89 = "memref.load"(%79, %arg11, %arg12, %arg13, %arg14) : (memref<1x32x1x128xi64>, index, index, index, index) -> i64
+        %90 = "arith.index_cast"(%89) : (i64) -> index
+        "memref.store"(%88, %74, %arg11, %arg12, %90, %arg14) : (f32, memref<1x32x1024x128xf32>, index, index, index, index) -> ()
+        "scf.yield"() : () -> ()
+      }) : (index, index, index) -> ()
+      "scf.yield"() : () -> ()
+    }) : (index, index, index) -> ()
+    "scf.yield"() : () -> ()
+  }) : (index, index, index) -> ()
+  "scf.yield"() : () -> ()
+}) : (index, index, index) -> ()
+%87 = "bufferization.to_tensor"(%74) <{restrict}> : (memref<1x32x1024x128xf32>) -> tensor<1x32x1024x128xf32>
+
+====================Graph Node====================
+Node: slice_8
+Type: OpType.ReshapeType
+Arguments: ['expand_1', 0, 0, 9223372036854775807]
+Parents: ['expand_1']
+Children: ['slice_9']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: slice_9
+Type: OpType.ReshapeType
+Arguments: ['slice_8', 1, 0, 9223372036854775807]
+Parents: ['slice_8']
+Children: ['slice_10']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: slice_10
+Type: OpType.ReshapeType
+Arguments: ['slice_9', 2, 0, 9223372036854775807]
+Parents: ['slice_9']
+Children: ['where']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: scalar_tensor
+Type: OpType.PlaceholderType
+Arguments: [-inf]
+Parents: []
+Children: ['where']
+--------------------MLIR OPS--------------------
+%88 = "arith.constant"() <{value = 0xFF800000 : f32}> : () -> f32
+
+====================Graph Node====================
+Node: scalar_tensor_1
+Type: OpType.PlaceholderType
+Arguments: [0.0]
+Parents: []
+Children: ['where']
+--------------------MLIR OPS--------------------
+%89 = "arith.constant"() <{value = 0.000000e+00 : f32}> : () -> f32
+
+====================Graph Node====================
+Node: where
+Type: OpType.BroadcastType
+Arguments: ['slice_10', 'scalar_tensor_1', 'scalar_tensor']
+Parents: ['slice_10', 'scalar_tensor_1', 'scalar_tensor']
+Children: ['_scaled_dot_product_flash_attention_for_cpu']
+--------------------MLIR OPS--------------------
+%90 = "tensor.empty"() : () -> tensor<1x1x1x1024xf32>
+%91 = "tensor.splat"(%89) : (f32) -> tensor<1x1x1x1024xf32>
+%92 = "tensor.splat"(%88) : (f32) -> tensor<1x1x1x1024xf32>
+%93 = "linalg.generic"(%arg7, %91, %92, %90) <{indexing_maps = [affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>], iterator_types = [#linalg.iterator_type<parallel>, #linalg.iterator_type<parallel>, #linalg.iterator_type<parallel>, #linalg.iterator_type<parallel>], operandSegmentSizes = array<i32: 3, 1>}> ({
+^bb0(%arg11: i1, %arg12: f32, %arg13: f32, %arg14: f32):
+  %94 = "arith.select"(%arg11, %arg12, %arg13) : (i1, f32, f32) -> f32
+  "linalg.yield"(%94) : (f32) -> ()
+}) : (tensor<1x1x1x1024xi1>, tensor<1x1x1x1024xf32>, tensor<1x1x1x1024xf32>, tensor<1x1x1x1024xf32>) -> tensor<1x1x1x1024xf32>
+
+====================Graph Node====================
+Node: _scaled_dot_product_flash_attention_for_cpu
+Type: OpType.ElementwiseType
+Arguments: ['add_2', 'index_put', 'index_put_1']
+Parents: ['add_2', 'index_put', 'index_put_1']
+Children: ['getitem']
+--------------------MLIR OPS--------------------
+%94 = "arith.constant"() <{value = 0.000000e+00 : f32}> : () -> f32
+%95 = "tensor.splat"(%94) : (f32) -> tensor<1x1024xf32>
+%96 = "tosa.const_shape"() <{values = dense<[1, 1024]> : tensor<2xindex>}> : () -> !tosa.shape<2>
+%97 = "tosa.reshape"(%93, %96) : (tensor<1x1x1x1024xf32>, !tosa.shape<2>) -> tensor<1x1024xf32>
+%98 = "tosa.add"(%95, %97) : (tensor<1x1024xf32>, tensor<1x1024xf32>) -> tensor<1x1024xf32>
+%99 = "tosa.const_shape"() <{values = dense<[32, 1, 128]> : tensor<3xindex>}> : () -> !tosa.shape<3>
+%100 = "tosa.reshape"(%46, %99) : (tensor<1x32x1x128xf32>, !tosa.shape<3>) -> tensor<32x1x128xf32>
+%101 = "tosa.const_shape"() <{values = dense<[32, 1024, 128]> : tensor<3xindex>}> : () -> !tosa.shape<3>
+%102 = "tosa.reshape"(%73, %101) : (tensor<1x32x1024x128xf32>, !tosa.shape<3>) -> tensor<32x1024x128xf32>
+%103 = "arith.constant"() <{value = dense<0.000000e+00> : tensor<32x1x1024xf32>}> : () -> tensor<32x1x1024xf32>
+%104 = "linalg.batch_matmul_transpose_b"(%100, %102, %103) <{operandSegmentSizes = array<i32: 2, 1>}> ({
+^bb0(%arg11: f32, %arg12: f32, %arg13: f32):
+  %129 = "arith.mulf"(%arg11, %arg12) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+  %130 = "arith.addf"(%arg13, %129) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+  "linalg.yield"(%130) : (f32) -> ()
+}) {linalg.memoized_indexing_maps = [affine_map<(d0, d1, d2, d3) -> (d0, d1, d3)>, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3)>, affine_map<(d0, d1, d2, d3) -> (d0, d1, d2)>]} : (tensor<32x1x128xf32>, tensor<32x1024x128xf32>, tensor<32x1x1024xf32>) -> tensor<32x1x1024xf32>
+%105 = "arith.constant"() <{value = 0.0883883461 : f32}> : () -> f32
+%106 = "tensor.splat"(%105) : (f32) -> tensor<32x1x1024xf32>
+%107 = "tosa.const"() <{values = dense<0> : tensor<1xi8>}> : () -> tensor<1xi8>
+%108 = "tosa.mul"(%104, %106, %107) : (tensor<32x1x1024xf32>, tensor<32x1x1024xf32>, tensor<1xi8>) -> tensor<32x1x1024xf32>
+%109 = "tosa.const_shape"() <{values = dense<[1, 1, 1024]> : tensor<3xindex>}> : () -> !tosa.shape<3>
+%110 = "tosa.reshape"(%98, %109) : (tensor<1x1024xf32>, !tosa.shape<3>) -> tensor<1x1x1024xf32>
+%111 = "tosa.add"(%108, %110) : (tensor<32x1x1024xf32>, tensor<1x1x1024xf32>) -> tensor<32x1x1024xf32>
+%112 = "tosa.reduce_max"(%111) <{axis = 2 : i32, nan_mode = "PROPAGATE"}> : (tensor<32x1x1024xf32>) -> tensor<32x1x1xf32>
+%113 = "tosa.sub"(%111, %112) : (tensor<32x1x1024xf32>, tensor<32x1x1xf32>) -> tensor<32x1x1024xf32>
+%114 = "math.exp"(%113) <{fastmath = #arith.fastmath<none>}> : (tensor<32x1x1024xf32>) -> tensor<32x1x1024xf32>
+%115 = "tosa.reduce_sum"(%114) <{axis = 2 : i32}> : (tensor<32x1x1024xf32>) -> tensor<32x1x1xf32>
+%116 = "tosa.log"(%115) : (tensor<32x1x1xf32>) -> tensor<32x1x1xf32>
+%117 = "tosa.add"(%112, %116) : (tensor<32x1x1xf32>, tensor<32x1x1xf32>) -> tensor<32x1x1xf32>
+%118 = "tosa.sub"(%111, %117) : (tensor<32x1x1024xf32>, tensor<32x1x1xf32>) -> tensor<32x1x1024xf32>
+%119 = "math.exp"(%118) <{fastmath = #arith.fastmath<none>}> : (tensor<32x1x1024xf32>) -> tensor<32x1x1024xf32>
+%120 = "tosa.const_shape"() <{values = dense<[1, 32, 1]> : tensor<3xindex>}> : () -> !tosa.shape<3>
+%121 = "tosa.reshape"(%117, %120) : (tensor<32x1x1xf32>, !tosa.shape<3>) -> tensor<1x32x1xf32>
+%122 = "tosa.const_shape"() <{values = dense<[32, 1024, 128]> : tensor<3xindex>}> : () -> !tosa.shape<3>
+%123 = "tosa.reshape"(%87, %122) : (tensor<1x32x1024x128xf32>, !tosa.shape<3>) -> tensor<32x1024x128xf32>
+%124 = "tosa.const"() <{values = dense<0.000000e+00> : tensor<1xf32>}> : () -> tensor<1xf32>
+%125 = "tosa.const"() <{values = dense<0.000000e+00> : tensor<1xf32>}> : () -> tensor<1xf32>
+%126 = "tosa.matmul"(%119, %123, %124, %125) : (tensor<32x1x1024xf32>, tensor<32x1024x128xf32>, tensor<1xf32>, tensor<1xf32>) -> tensor<32x1x128xf32>
+%127 = "tosa.const_shape"() <{values = dense<[1, 32, 1, 128]> : tensor<4xindex>}> : () -> !tosa.shape<4>
+%128 = "tosa.reshape"(%126, %127) : (tensor<32x1x128xf32>, !tosa.shape<4>) -> tensor<1x32x1x128xf32>
+
+====================Graph Node====================
+Node: getitem
+Type: OpType.GetItemType
+Arguments: ['_scaled_dot_product_flash_attention_for_cpu', 0]
+Parents: ['_scaled_dot_product_flash_attention_for_cpu']
+Children: ['view_14']
+--------------------MLIR OPS--------------------
+
+====================Graph Node====================
+Node: view_14
+Type: OpType.ReshapeType
+Arguments: ['getitem', [1, 1, -1]]
+Parents: ['getitem']
+Children: ['view_15']
+--------------------MLIR OPS--------------------
+%129 = "tosa.const_shape"() <{values = dense<[1, 1, 4096]> : tensor<3xindex>}> : () -> !tosa.shape<3>
+%130 = "tosa.reshape"(%128, %129) : (tensor<1x32x1x128xf32>, !tosa.shape<3>) -> tensor<1x1x4096xf32>
+
+====================Graph Node====================
+Node: view_15
+Type: OpType.ReshapeType
+Arguments: ['view_14', [1, 4096]]
+Parents: ['view_14']
+Children: ['mm_3']
+--------------------MLIR OPS--------------------
+%131 = "tosa.const_shape"() <{values = dense<[1, 4096]> : tensor<2xindex>}> : () -> !tosa.shape<2>
+%132 = "tosa.reshape"(%130, %131) : (tensor<1x1x4096xf32>, !tosa.shape<2>) -> tensor<1x4096xf32>
+
+====================Graph Node====================
+Node: mm_3
+Type: OpType.ReduceType
+Arguments: ['view_15', 'arg72_1']
+Parents: ['view_15', 'arg72_1']
+Children: ['view_16']
+--------------------MLIR OPS--------------------
+%133 = "arith.constant"() <{value = dense<0.000000e+00> : tensor<1x4096xf32>}> : () -> tensor<1x4096xf32>
+%134 = "linalg.matmul"(%132, %arg3, %133) <{cast = #linalg.type_fn<cast_signed>, indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>, affine_map<(d0, d1, d2) -> (d0, d1)>], operandSegmentSizes = array<i32: 2, 1>}> ({
+^bb0(%arg11: f32, %arg12: f32, %arg13: f32):
+  %135 = "arith.mulf"(%arg11, %arg12) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+  %136 = "arith.addf"(%arg13, %135) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+  "linalg.yield"(%136) : (f32) -> ()
+}) : (tensor<1x4096xf32>, tensor<4096x4096xf32>, tensor<1x4096xf32>) -> tensor<1x4096xf32>
+
+====================Graph Node====================
+Node: output
+Type: OpType.GetItemType
+Arguments: ['index_put', 'index_put_1', 'mm_3']
+Parents: ['index_put', 'index_put_1', 'mm_3']
+Children: []
+--------------------MLIR OPS--------------------
+

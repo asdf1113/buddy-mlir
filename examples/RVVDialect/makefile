@@ -2,8 +2,8 @@
 
 # Build Directories
 MLIR_BUILD_DIR := ../../llvm/build/
-BUDDY_MLIR_BUILD_DIR := ../../build/
-CROSS_BUDDY_MLIR_BUILD_DIR := ../../build-cross-rv/
+BUDDY_MLIR_BUILD_DIR := ../../build_rvv_20260304/
+CROSS_BUDDY_MLIR_BUILD_DIR := ../../build-cross-rv_20260304/
 CROSS_LLVM_BUILD_DIR := ../../llvm/build-cross-clang-rv/
 CROSS_MLIR_BUILD_DIR := ../../llvm/build-cross-mlir-rv/
 

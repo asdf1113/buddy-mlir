@@ -27,6 +27,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <ostream>
 #include <string>
 #include <variant>
 #include <vector>
@@ -417,16 +418,39 @@ int main() {
   for (int i = 1; i <= generateLen; i++) {
 
     const auto inferenceStart = std::chrono::high_resolution_clock::now();
+    std::cout << "\n\033[33;1m[Decoding Iteration " << i << "]\033[0m"
+              << std::endl;
+    std::cout << "inputContainerDecode: " << inputContainerDecode.getData()[0]
+              << std::endl;
+
     _mlir_ciface_forward_decode0(resultContainerDecodePtr, &paramsContainer0,
                                  &inputContainerDecode, &cachePosition);
 
     inputMemrefDecode = resultContainerDecodePtr->data;
-
+    float *inputPtr = resultContainerDecodePtr->data.getData();
+    std::cout << "Data after decode0: " << inputPtr[0] << ", " << inputPtr[1]
+              << ", " << inputPtr[2] << std::endl;
     for (int m = 0; m < 28; m++) {
+
       _mlir_ciface_forward_decode1(&decodeData, &paramsContainers[m * 6],
                                    &inputMemrefDecode);
+      std::cout << "Data after decode1: " << decodeData.getData()[0] << ", "
+                << decodeData.getData()[1] << ", " << decodeData.getData()[2]
+                << std::endl;
 
-
+      std::cout << "[DEBUG]:  INPUT FOR DECODE2, cachePosition: "
+                << cachePosition.getData()[0] << std::endl;
+      std::cout << "[DEBUG]:  INPUT FOR DECODE2, cos: "
+                << resultContainerDecodePtr->cos.getData()[0] << ", "
+                << resultContainerDecodePtr->cos.getData()[1] << ", "
+                << resultContainerDecodePtr->cos.getData()[2] << std::endl;
+      std::cout << "[DEBUG]:  INPUT FOR DECODE2, SIN: "
+                << resultContainerDecodePtr->sin.getData()[0] << ", "
+                << resultContainerDecodePtr->sin.getData()[1] << ", "
+                << resultContainerDecodePtr->sin.getData()[2] << std::endl;
+      std::cout << "[DEBUG]:  INPUT FOR DECODE2, kv0: "
+                << kv0[2 * m].getData()[0] << ", " << kv0[2 * m].getData()[1]
+                << ", " << kv0[2 * m].getData()[2] << std::endl;
       _mlir_ciface_forward_decode2(
           kvDecodeContainerPtr0, &paramsContainers[m * 6 + 1], &cachePosition,
           &kv0[2 * m], &kv0[2 * m + 1], &resultContainerDecodePtr->mask,
@@ -434,7 +458,6 @@ int main() {
           &decodeData);
       kv0[2 * m] = kvDecodeContainerPtr0->kcache;
       kv0[2 * m + 1] = kvDecodeContainerPtr0->vcache;
-
 
       _mlir_ciface_forward_decode2(
           kvDecodeContainerPtr1, &paramsContainers[m * 6 + 2], &cachePosition,
@@ -445,12 +468,20 @@ int main() {
       kv1[2 * m + 1] = kvDecodeContainerPtr1->vcache;
 
       mhaDecodeData0 = kvDecodeContainerPtr0->data;
+      std::cout << "after decode2 的 1" << mhaDecodeData0.getData()[0] << ","
+                << mhaDecodeData0.getData()[1] << ","
+                << mhaDecodeData0.getData()[2] << std::endl;
       mhaDecodeData1 = kvDecodeContainerPtr1->data;
       mhaDecodeData0.addMemRef(mhaDecodeData0, mhaDecodeData1);
-
+      std::cout << "after 通信" << mhaDecodeData0.getData()[0] << ","
+                << mhaDecodeData0.getData()[1] << ","
+                << mhaDecodeData0.getData()[2] << std::endl;
 
       _mlir_ciface_forward_decode3(&inputMemrefDecode, &inputMemrefDecode,
                                    &mhaDecodeData0);
+      std::cout << "after decode3 的 1" << inputMemrefDecode.getData()[0] << ","
+                << inputMemrefDecode.getData()[1] << ","
+                << inputMemrefDecode.getData()[2] << std::endl;
       _mlir_ciface_forward_decode1(&decodeData, &paramsContainers[m * 6 + 3],
                                    &inputMemrefDecode);
 
@@ -458,15 +489,37 @@ int main() {
                                    &paramsContainers[m * 6 + 4], &decodeData);
       _mlir_ciface_forward_decode5(&mhaDecodeData1,
                                    &paramsContainers[m * 6 + 5], &decodeData);
+      std::cout << "after decode5 的 1" << mhaDecodeData0.getData()[0] << ","
+                << mhaDecodeData0.getData()[1] << ","
+                << mhaDecodeData0.getData()[2] << std::endl;
       mhaDecodeData0.addMemRef(mhaDecodeData0, mhaDecodeData1);
-
+      std::cout << "after decode5 通信" << mhaDecodeData0.getData()[0] << ","
+                << mhaDecodeData0.getData()[1] << ","
+                << mhaDecodeData0.getData()[2] << std::endl;
 
       _mlir_ciface_forward_decode3(&inputMemrefDecode, &inputMemrefDecode,
                                    &mhaDecodeData0);
+      std::cout << "after mlp decode3 的 1" << inputMemrefDecode.getData()[0]
+                << "," << inputMemrefDecode.getData()[1] << std::endl;
+      if (m == 13) {
+        float *inputPtr = inputMemrefDecode.getData();
+        std::cout << "1发出的: " << inputPtr[0] << ", " << inputPtr[1] << ", "
+                  << inputPtr[2] << std::endl;
+      }
     }
+    float *outputPtrDecode = inputMemrefDecode.getData();
 
+    std::cout << "Finished all layers in decode, start final output projection."
+              << std::endl;
+    std::cout << "outputPtrDecode: " << outputPtrDecode[0] << ", "
+              << outputPtrDecode[1] << ", " << outputPtrDecode[2] << std::endl;
     _mlir_ciface_forward_decode169(&resultDecode, &paramsContainer2,
                                    &inputMemrefDecode);
+
+    std::cout << "Finished output projection." << std::endl;
+    std::cout << "resultDecode: " << resultDecode.getData()[0] << ", "
+              << resultDecode.getData()[1] << ", " << resultDecode.getData()[2]
+              << std::endl;
 
     const auto inferenceEnd = std::chrono::high_resolution_clock::now();
     const std::chrono::duration<double, std::milli> inferenceTime =
