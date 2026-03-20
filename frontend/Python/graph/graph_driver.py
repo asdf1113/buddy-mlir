@@ -974,7 +974,7 @@ class GraphDriver:
                 )
                 self._modules[main_graph_name] = main_importer.import_main_graph()
 
-        if(self.graph._verbose):
+        if self._graph._verbose:
             print(f"split_group: {split_group}")
             print(f"param_size_group: {param_size_group}")
 

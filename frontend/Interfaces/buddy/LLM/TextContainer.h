@@ -84,6 +84,8 @@ public:
   // This function is designed for tokenizing input text for Qwen3 models.
   void tokenizeQwen3(const std::string &vocab, size_t length);
 
+  void assignTokenIds(const std::vector<size_t> &ids, size_t length);
+
   // Revert the ids into tokens.
   // This function initializes the conversion from Text memref to a string.
   // Tokens are identified by ids and thick underlines are replaced with
@@ -337,6 +339,34 @@ void Text<T, N>::tokenizeBert(const std::string &vocab, size_t length,
   // Padding the rest text container.
   for (size_t i = tokenCnt; i < length; i++) {
     this->aligned[i] = pad;
+  }
+}
+
+template <typename T, size_t N>
+void Text<T, N>::assignTokenIds(const std::vector<size_t> &ids, size_t length) {
+  // Initialize MemRef container members.
+  this->offset = 0;
+  this->sizes[0] = 1;
+  this->sizes[1] = length;
+  this->setStrides();
+
+  size_t size = this->product(this->sizes);
+  this->allocated = (T *)malloc(sizeof(T) * size);
+  this->aligned = this->allocated;
+
+  // Llama 3.x 没有真正意义上的 pad token。
+  // 这里只是为了把固定长度张量填满，先用 0 占位做实验。
+  // 后面如果模型对 padding 敏感，再单独处理。
+  size_t fillValue = 0;
+
+  tokenCnt = std::min(ids.size(), length);
+
+  size_t i = 0;
+  for (; i < tokenCnt; ++i) {
+    this->aligned[i] = static_cast<T>(ids[i]);
+  }
+  for (; i < length; ++i) {
+    this->aligned[i] = static_cast<T>(fillValue);
   }
 }
 
