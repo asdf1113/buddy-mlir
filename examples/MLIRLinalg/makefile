@@ -1,5 +1,5 @@
 #!/bin/bash
-BUDDY_OPT := ../../build/bin/buddy-opt
+BUDDY_OPT := ../../build_20260320_llama1B_rvv/bin/buddy-opt
 MLIR_OPT := ../../llvm/build/bin/mlir-opt
 MLIR_TRANSLATE := ../../llvm/build/bin/mlir-translate
 MLIR_CPU_RUNNER := ../../llvm/build/bin/mlir-runner
@@ -146,6 +146,21 @@ linalg-matmul-optimize-lower:
 	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
 		--matmul-optimize="vec-size=16 kernel-m=2 kernel-n=4" \
 		-o ./log.mlir
+
+linalg-matmul-oldpass-lower:
+	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
+		--matmul-parallel-vectorization-optimize \
+		-o ./logold.mlir
+
+linalg-matmul-unroll-lower:
+	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
+		--matmul-vectorization \
+		-o ./logunroll.mlir
+
+linalg-matmul-veccache-lower:
+	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
+		--matmul-rvv \
+		-o ./logveccache.mlir		
 
 linalg-matmul-optimize-translate:
 	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
