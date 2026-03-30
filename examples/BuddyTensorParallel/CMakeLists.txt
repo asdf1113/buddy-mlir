@@ -437,6 +437,84 @@ set(SUBGRAPH_DECODE_PASSES
   -reconcile-unrealized-casts
 )
 
+set(SUBGRAPH_DECODE_PASSES_RVV_K64
+  -eliminate-empty-tensors
+  -empty-tensor-to-alloc-tensor
+  -convert-elementwise-to-linalg
+  -one-shot-bufferize=${BUFFERIZE_SIMPLE_OPTS}
+  -expand-strided-metadata
+  -ownership-based-buffer-deallocation
+  -canonicalize
+  -buffer-deallocation-simplification
+  -bufferization-lower-deallocations
+  -cse
+  -canonicalize
+  -optimize-allocation-liveness
+  -assume-tight-memref-layout
+  -staticize-memref-layout
+  -matmul-rvv=vector-size=64 k-block-size=64
+  -batch-matmul-vectorization-decode=vector-size=128
+  -batchmatmul-transpose-b-vectorization=vector-size=16
+  -convert-linalg-to-affine-loops
+  -convert-vector-to-scf
+  -lower-affine
+  -convert-scf-to-openmp=${OPENMP_NUM_THREADS}
+  -cse
+  -memref-expand
+  -arith-expand
+  -convert-vector-to-llvm
+  -convert-arith-to-llvm
+  -finalize-memref-to-llvm
+  -convert-scf-to-cf
+  -convert-cf-to-llvm
+  -llvm-request-c-wrappers
+  -convert-openmp-to-llvm
+  -convert-arith-to-llvm
+  -convert-math-to-llvm
+  -convert-math-to-libm
+  -convert-func-to-llvm
+  -reconcile-unrealized-casts
+)
+
+set(SUBGRAPH_DECODE_PASSES_RVV_K16
+  -eliminate-empty-tensors
+  -empty-tensor-to-alloc-tensor
+  -convert-elementwise-to-linalg
+  -one-shot-bufferize=${BUFFERIZE_SIMPLE_OPTS}
+  -expand-strided-metadata
+  -ownership-based-buffer-deallocation
+  -canonicalize
+  -buffer-deallocation-simplification
+  -bufferization-lower-deallocations
+  -cse
+  -canonicalize
+  -optimize-allocation-liveness
+  -assume-tight-memref-layout
+  -staticize-memref-layout
+  -matmul-rvv=vector-size=64 k-block-size=16
+  -batch-matmul-vectorization-decode=vector-size=128
+  -batchmatmul-transpose-b-vectorization=vector-size=16
+  -convert-linalg-to-affine-loops
+  -convert-vector-to-scf
+  -lower-affine
+  -convert-scf-to-openmp=${OPENMP_NUM_THREADS}
+  -cse
+  -memref-expand
+  -arith-expand
+  -convert-vector-to-llvm
+  -convert-arith-to-llvm
+  -finalize-memref-to-llvm
+  -convert-scf-to-cf
+  -convert-cf-to-llvm
+  -llvm-request-c-wrappers
+  -convert-openmp-to-llvm
+  -convert-arith-to-llvm
+  -convert-math-to-llvm
+  -convert-math-to-libm
+  -convert-func-to-llvm
+  -reconcile-unrealized-casts
+)
+
 # ==============================================================================
 # Build helper functions
 # ==============================================================================
@@ -492,12 +570,24 @@ function(build_forward_decode N)
 endfunction()
 
 function(build_subgraph_decode N)
+  if(CROSS_COMPILE_RVV)
+    if("${N}" STREQUAL "2" OR "${N}" STREQUAL "3")
+      set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K64})
+    else()
+      # subgraph6、subgraph197，以及其余 decode 子图都用 k16
+      set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K16})
+    endif()
+  else()
+    # set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES})
+      set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K64})
+  endif()
+
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode${N}.o
     COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/subgraph0_decode${N}.mlir
     -simplify-tosa-reshape -simplify-tosa-matmul-scalar |
     ${LLVM_TOOLS_BIN_DIR}/mlir-opt -pass-pipeline ${TOSA_PIPELINE} |
-    ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${SUBGRAPH_DECODE_PASSES} |
+    ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${SUBGRAPH_DECODE_PASSES_SELECTED} |
     ${LLVM_TOOLS_BIN_DIR}/mlir-translate -mlir-to-llvmir |
     ${LLVM_TOOLS_BIN_DIR}/llvm-as |
     ${LLVM_TOOLS_BIN_DIR}/llc ${LLC_TARGET_FLAGS} -filetype=obj -relocation-model=pic -O3

@@ -35,8 +35,10 @@ constexpr int PeerRank = 1;
 
 namespace CommTag {
 constexpr int PrefillHidden = 100;
-constexpr int PrefillAux = 101;
-constexpr int PrefillReturnHidden = 102;
+constexpr int PrefillAuxMask = 101;
+constexpr int PrefillAuxCos = 102;
+constexpr int PrefillAuxSin = 103;
+constexpr int PrefillReturnHidden = 104;
 constexpr int DecodePacketA = 200;
 constexpr int DecodePacketB = 201;
 } // namespace CommTag
@@ -676,8 +678,7 @@ int main(int argc, char *argv[]) {
     metrics.input_log_s += elapsedSeconds(tInputLog);
 
     MPI_Request send_req[2], recv_req[2];
-    MPI_Request send_req_mha[1];
-    auto prefillAuxSendPacket = std::make_unique<PrefillAuxPacket>();
+    MPI_Request send_req_mha[3];
     DecodePacketA decodePacketASend;
     DecodePacketB decodePacketBSend;
 
@@ -714,12 +715,17 @@ int main(int argc, char *argv[]) {
              elapsedSeconds(t0));
 
     t0 = SteadyClock::now();
-    packPrefillAuxPacket(*prefillAuxSendPacket, *resultContainerPtr);
-    MPI_Isend(reinterpret_cast<const void *>(prefillAuxSendPacket.get()),
-              static_cast<int>(sizeof(PrefillAuxPacket)), MPI_BYTE, peerRank,
-              CommTag::PrefillAux, MPI_COMM_WORLD, &send_req_mha[0]);
+    MPI_Isend(resultContainerPtr->mask.getData(),
+              MaxTokenLength * MaxTokenLength, MPI_BYTE, peerRank,
+              CommTag::PrefillAuxMask, MPI_COMM_WORLD, &send_req_mha[0]);
+    MPI_Isend(resultContainerPtr->cos.getData(),
+              MaxTokenLength * HiddenSize, MPI_FLOAT, peerRank,
+              CommTag::PrefillAuxCos, MPI_COMM_WORLD, &send_req_mha[1]);
+    MPI_Isend(resultContainerPtr->sin.getData(),
+              MaxTokenLength * HiddenSize, MPI_FLOAT, peerRank,
+              CommTag::PrefillAuxSin, MPI_COMM_WORLD, &send_req_mha[2]);
     addStage(metrics.prefill, "prefill", "p2p",
-             "rank1.prefill.isend_aux_packet", elapsedSeconds(t0));
+             "rank1.prefill.isend_aux_triplet", elapsedSeconds(t0));
 
     t0 = SteadyClock::now();
     MPI_Irecv(outputPtr + offset0, subSize, MPI_FLOAT, peerRank,
@@ -826,9 +832,10 @@ int main(int argc, char *argv[]) {
     addStage(metrics.prefill, "prefill", "wait",
              "rank1.prefill.wait_peer_half", elapsedSeconds(t0));
 
-    MPI_Request prefillSends[2] = {send_req[0], send_req_mha[0]};
+    MPI_Request prefillSends[4] = {send_req[0], send_req_mha[0],
+                                   send_req_mha[1], send_req_mha[2]};
     t0 = SteadyClock::now();
-    MPI_Waitall(2, prefillSends, MPI_STATUSES_IGNORE);
+    MPI_Waitall(4, prefillSends, MPI_STATUSES_IGNORE);
     addStage(metrics.prefill, "prefill", "wait",
              "rank1.prefill.wait_send_complete", elapsedSeconds(t0));
 
@@ -882,10 +889,6 @@ int main(int argc, char *argv[]) {
     // -----------------------------------------------------------------------
     MemRef<float, 3> subResultContainerDecode({1, 1, HiddenSize0});
     MemRef<float, 3> sub3DContainerDecode({1, 1, HiddenSize0});
-    MemRef<int8_t, 4> mhaMemRef4DDecodeLocal({1, 1, 1, MaxTokenLength});
-    MemRef<float, 3> mhaMemRef3D1DecodeLocal({1, 1, HiddenSize});
-    MemRef<float, 3> mhaMemRef3D2DecodeLocal({1, 1, HiddenSize});
-    MemRef<long long, 1> cachePositionLocal({1}, 0LL);
     MemRef<float, 2> tmp2DContainerDecode({1, HiddenSize0});
     MemRef<float, 2> sub2DContainerDecode({1, HiddenSize0});
     // Do not cache subResultContainerDecode.getData() across iterations.
@@ -917,21 +920,11 @@ int main(int argc, char *argv[]) {
       t0 = SteadyClock::now();
       std::memcpy(subResultContainerDecode.getData(), inputPtr,
                   sizeof(float) * HiddenSize0);
-      std::memcpy(mhaMemRef4DDecodeLocal.getData(),
-                  resultContainerDecodePtr->mask.getData(),
-                  sizeof(int8_t) * MaxTokenLength);
-      std::memcpy(mhaMemRef3D1DecodeLocal.getData(),
-                  resultContainerDecodePtr->cos.getData(),
-                  sizeof(float) * HiddenSize);
-      std::memcpy(mhaMemRef3D2DecodeLocal.getData(),
-                  resultContainerDecodePtr->sin.getData(),
-                  sizeof(float) * HiddenSize);
-      cachePositionLocal.getData()[0] = cachePosition.getData()[0];
-      packDecodePacketA(decodePacketASend, 0, cachePositionLocal.getData()[0],
+      packDecodePacketA(decodePacketASend, 0, cachePosition.getData()[0],
                         inputPtr);
       packDecodePacketB(decodePacketBSend, *resultContainerDecodePtr);
       addStage(metrics.decode, "decode", "compute",
-               "rank1.decode.materialize_local_inputs", elapsedSeconds(t0));
+               "rank1.decode.copy_hidden_and_pack_packets", elapsedSeconds(t0));
 
       t0 = SteadyClock::now();
       MPI_Isend(reinterpret_cast<const void *>(&decodePacketASend),
@@ -961,9 +954,9 @@ int main(int argc, char *argv[]) {
         t0 = SteadyClock::now();
         _mlir_ciface_forward_decode3(
             kvDecodeContainerPtr0, &paramsContainersMHA1[m],
-            &cachePositionLocal, &kv0[2 * m], &kv0[2 * m + 1],
-            &mhaMemRef4DDecodeLocal, &mhaMemRef3D1DecodeLocal,
-            &mhaMemRef3D2DecodeLocal, &kvDecodeContainerTempPtr->qcache,
+            &cachePosition, &kv0[2 * m], &kv0[2 * m + 1],
+            &resultContainerDecodePtr->mask, &resultContainerDecodePtr->cos,
+            &resultContainerDecodePtr->sin, &kvDecodeContainerTempPtr->qcache,
             &kvDecodeContainerTempPtr->kcache,
             &kvDecodeContainerTempPtr->vcache);
         addStage(metrics.decode, "decode", "compute",
@@ -1157,9 +1150,8 @@ int main(int argc, char *argv[]) {
     int source = FrontendRank;
     int nextRank = FrontendRank;
     MPI_Request recv_req[2];
-    MPI_Request mha_recv_req[1];
+    MPI_Request mha_recv_req[3];
     MPI_Request decode_recv_packet_b = MPI_REQUEST_NULL;
-    auto prefillAuxRecvPacket = std::make_unique<PrefillAuxPacket>();
     DecodePacketA decodePacketARecv;
     DecodePacketB decodePacketBRecv;
     std::vector<std::string> paramsDirsRMS, paramsDirsRMS0;
@@ -1223,11 +1215,17 @@ int main(int argc, char *argv[]) {
     auto workerPrefillStart = SteadyClock::now();
 
     auto t0 = SteadyClock::now();
-    MPI_Irecv(reinterpret_cast<void *>(prefillAuxRecvPacket.get()),
-              static_cast<int>(sizeof(PrefillAuxPacket)), MPI_BYTE, source,
-              CommTag::PrefillAux, MPI_COMM_WORLD, &mha_recv_req[0]);
+    MPI_Irecv(mhaMemRef4D.getData(), MaxTokenLength * MaxTokenLength, MPI_BYTE,
+              source, CommTag::PrefillAuxMask, MPI_COMM_WORLD,
+              &mha_recv_req[0]);
+    MPI_Irecv(mhaMemRef3D1.getData(), MaxTokenLength * HiddenSize, MPI_FLOAT,
+              source, CommTag::PrefillAuxCos, MPI_COMM_WORLD,
+              &mha_recv_req[1]);
+    MPI_Irecv(mhaMemRef3D2.getData(), MaxTokenLength * HiddenSize, MPI_FLOAT,
+              source, CommTag::PrefillAuxSin, MPI_COMM_WORLD,
+              &mha_recv_req[2]);
     addStage(metrics.prefill, "prefill", "p2p",
-             "rank2.prefill.irecv_aux_packet", elapsedSeconds(t0));
+             "rank2.prefill.irecv_aux_triplet", elapsedSeconds(t0));
 
     t0 = SteadyClock::now();
     MPI_Irecv(subResultPtr, subSize, MPI_FLOAT, source, CommTag::PrefillHidden,
@@ -1264,15 +1262,9 @@ int main(int argc, char *argv[]) {
 
       if (m == 0) {
         t0 = SteadyClock::now();
-        MPI_Waitall(1, mha_recv_req, MPI_STATUSES_IGNORE);
+        MPI_Waitall(3, mha_recv_req, MPI_STATUSES_IGNORE);
         addStage(metrics.prefill, "prefill", "wait",
-                 "rank2.prefill.wait_aux_packet", elapsedSeconds(t0));
-
-        t0 = SteadyClock::now();
-        unpackPrefillAuxPacket(*prefillAuxRecvPacket, mhaMemRef4D, mhaMemRef3D1,
-                               mhaMemRef3D2);
-        addStage(metrics.prefill, "prefill", "compute",
-                 "rank2.prefill.unpack_aux_packet", elapsedSeconds(t0));
+                 "rank2.prefill.wait_aux_triplet", elapsedSeconds(t0));
       }
 
       t0 = SteadyClock::now();
