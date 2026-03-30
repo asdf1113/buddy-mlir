@@ -203,7 +203,7 @@ else()
   )
 
   set(DSTP_EXAMPLE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
-  set(DSTP_EXAMPLE_BUILD_PATH ${CMAKE_CURRENT_BINARY_DIR})
+  set(DSTP_EXAMPLE_BUILD_PATH /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329)
 endif()
 
 # ==============================================================================
@@ -284,38 +284,42 @@ add_dependencies(mpich_cxx mpich_ep)
 # ==============================================================================
 # Generate MLIR files
 # ==============================================================================
-add_custom_command(
-  OUTPUT
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_decode0.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_decode1.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_decode2.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_decode3.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_decode5.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_decode169.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode0.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode1.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode2.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode3.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode5.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode169.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill0.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill1.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill2.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill3.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill5.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill169.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill0.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill1.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill2.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill3.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill5.mlir
-  ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill169.mlir
-  COMMAND ${Python3_EXECUTABLE}
-  ${CMAKE_CURRENT_SOURCE_DIR}/import-deepseek-r1.py
-  --output-dir ${CMAKE_CURRENT_BINARY_DIR}
-  COMMENT "Generating forward.mlir, subgraph.mlir and arg0.data..."
-  VERBATIM
-)
+# add_custom_command(
+#   OUTPUT
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode0.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode1.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode2.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode3.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode4.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode6.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode197.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode0.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode1.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode2.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode3.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode4.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode6.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode197.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill0.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill1.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill2.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill3.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill4.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill6.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill197.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill0.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill1.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill2.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill3.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill4.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill6.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill197.mlir
+#   COMMAND ${Python3_EXECUTABLE}
+#   ${CMAKE_CURRENT_SOURCE_DIR}/import-deepseek-r1.py
+#   --output-dir ${CMAKE_CURRENT_BINARY_DIR}
+#   COMMENT "Generating forward.mlir, subgraph.mlir and arg0.data..."
+#   VERBATIM
+# )
 
 # ==============================================================================
 # Pass pipelines
@@ -365,6 +369,7 @@ set(SUBGRAPH_PASSES
   -canonicalize
   -buffer-deallocation-simplification
   -bufferization-lower-deallocations
+  -convert-bufferization-to-memref
   -cse
   -canonicalize
   -optimize-allocation-liveness
@@ -438,7 +443,7 @@ set(SUBGRAPH_DECODE_PASSES
 function(build_forward_prefill N)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill${N}.o
-    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill${N}.mlir
+    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/forward_prefill${N}.mlir
     -simplify-tosa-reshape |
     ${LLVM_TOOLS_BIN_DIR}/mlir-opt -pass-pipeline ${TOSA_PIPELINE} |
     ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${FORWARD_PASSES} |
@@ -446,7 +451,7 @@ function(build_forward_prefill N)
     ${LLVM_TOOLS_BIN_DIR}/llvm-as |
     ${LLVM_TOOLS_BIN_DIR}/llc ${LLC_TARGET_FLAGS} -filetype=obj -relocation-model=pic -O3
     -o ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill${N}.o
-    DEPENDS ${BUDDY_OPT_DEP} ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill${N}.mlir
+    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/forward_prefill${N}.mlir
     COMMENT "Building forward_prefill${N}.o"
     VERBATIM
   )
@@ -455,7 +460,7 @@ endfunction()
 function(build_subgraph_prefill N)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${N}.o
-    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${N}.mlir
+    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/subgraph0_prefill${N}.mlir
     -simplify-tosa-reshape |
     ${LLVM_TOOLS_BIN_DIR}/mlir-opt -pass-pipeline ${TOSA_PIPELINE} |
     ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${SUBGRAPH_PASSES} |
@@ -463,7 +468,7 @@ function(build_subgraph_prefill N)
     ${LLVM_TOOLS_BIN_DIR}/llvm-as |
     ${LLVM_TOOLS_BIN_DIR}/llc ${LLC_TARGET_FLAGS} -filetype=obj -relocation-model=pic -O3
     -o ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${N}.o
-    DEPENDS ${BUDDY_OPT_DEP} ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${N}.mlir
+    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/subgraph0_prefill${N}.mlir
     COMMENT "Building subgraph0_prefill${N}.o"
     VERBATIM
   )
@@ -472,7 +477,7 @@ endfunction()
 function(build_forward_decode N)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/forward_decode${N}.o
-    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/forward_decode${N}.mlir
+    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/forward_decode${N}.mlir
     -simplify-tosa-reshape |
     ${LLVM_TOOLS_BIN_DIR}/mlir-opt -pass-pipeline ${TOSA_PIPELINE} |
     ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${FORWARD_PASSES} |
@@ -480,7 +485,7 @@ function(build_forward_decode N)
     ${LLVM_TOOLS_BIN_DIR}/llvm-as |
     ${LLVM_TOOLS_BIN_DIR}/llc ${LLC_TARGET_FLAGS} -filetype=obj -relocation-model=pic -O3
     -o ${CMAKE_CURRENT_BINARY_DIR}/forward_decode${N}.o
-    DEPENDS ${BUDDY_OPT_DEP} ${CMAKE_CURRENT_BINARY_DIR}/forward_decode${N}.mlir
+    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/forward_decode${N}.mlir
     COMMENT "Building forward_decode${N}.o"
     VERBATIM
   )
@@ -489,7 +494,7 @@ endfunction()
 function(build_subgraph_decode N)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode${N}.o
-    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode${N}.mlir
+    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/subgraph0_decode${N}.mlir
     -simplify-tosa-reshape -simplify-tosa-matmul-scalar |
     ${LLVM_TOOLS_BIN_DIR}/mlir-opt -pass-pipeline ${TOSA_PIPELINE} |
     ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${SUBGRAPH_DECODE_PASSES} |
@@ -497,7 +502,7 @@ function(build_subgraph_decode N)
     ${LLVM_TOOLS_BIN_DIR}/llvm-as |
     ${LLVM_TOOLS_BIN_DIR}/llc ${LLC_TARGET_FLAGS} -filetype=obj -relocation-model=pic -O3
     -o ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode${N}.o
-    DEPENDS ${BUDDY_OPT_DEP} ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode${N}.mlir
+    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/subgraph0_decode${N}.mlir
     COMMENT "Building subgraph0_decode${N}.o"
     VERBATIM
   )
@@ -506,7 +511,7 @@ endfunction()
 # ==============================================================================
 # Build libraries
 # ==============================================================================
-foreach(N 0 1 2 3 5 169)
+foreach(N 0 1 2 3 4 6 197)
   build_forward_prefill(${N})
   build_subgraph_prefill(${N})
   add_library(DSR1TP_prefill${N} STATIC
@@ -522,9 +527,9 @@ endforeach()
 
 set_target_properties(
   DSR1TP_prefill0 DSR1TP_prefill1 DSR1TP_prefill2
-  DSR1TP_prefill3 DSR1TP_prefill5 DSR1TP_prefill169
+  DSR1TP_prefill3 DSR1TP_prefill4 DSR1TP_prefill6 DSR1TP_prefill197
   DSR1TP_decode0 DSR1TP_decode1 DSR1TP_decode2
-  DSR1TP_decode3 DSR1TP_decode5 DSR1TP_decode169
+  DSR1TP_decode3 DSR1TP_decode4 DSR1TP_decode6 DSR1TP_decode197
   PROPERTIES
   LINKER_LANGUAGE C
 )
@@ -532,7 +537,7 @@ set_target_properties(
 # ==============================================================================
 # Final executable
 # ==============================================================================
-add_executable(buddy-deepseek-r1-distributed buddy-deepseek-r1-distributed.cpp)
+add_executable(buddy-deepseek-r1-distributed buddy-deepseek-test.cpp)
 
 add_dependencies(buddy-deepseek-r1-distributed mpich_ep)
 
@@ -554,14 +559,16 @@ target_link_libraries(buddy-deepseek-r1-distributed PRIVATE
   DSR1TP_prefill1
   DSR1TP_prefill2
   DSR1TP_prefill3
-  DSR1TP_prefill5
-  DSR1TP_prefill169
+  DSR1TP_prefill4
+  DSR1TP_prefill6
+  DSR1TP_prefill197
   DSR1TP_decode0
   DSR1TP_decode1
   DSR1TP_decode2
   DSR1TP_decode3
-  DSR1TP_decode5
-  DSR1TP_decode169
+  DSR1TP_decode4
+  DSR1TP_decode6
+  DSR1TP_decode197
   "${MLIR_RUNNER_UTILS_LIB}"
   "${OPENMP_LIB}"
   mpich_cxx
@@ -582,39 +589,76 @@ set(DEEPSEEKR1_PKG1_PARAM_FILES
   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill169_arg0.data
 )
 
+# ------------------------------------------------------------------------------
 # Package 2/3 common RMS parameters
+# Corresponding to:
+#   for (int i = 1; i < 197; i += 7) {
+#     paramsDirsRMS.emplace_back(... prefill{i}_arg0.data);
+#     paramsDirsRMS0.emplace_back(... prefill{i+4}_arg0.data);
+#   }
+# ------------------------------------------------------------------------------
 set(DEEPSEEKR1_PKG23_RMS_FILES)
-foreach(i 1 7 13 19 25 31 37 43 49 55 61 67 73 79 85 91 97 103 109 115 121 127 133 139 145 151 157 163)
+foreach(i RANGE 1 190 7)
   list(APPEND DEEPSEEKR1_PKG23_RMS_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i}_arg0.data
   )
-  math(EXPR i_plus_3 "${i} + 3")
+  math(EXPR i_plus_4 "${i} + 4")
   list(APPEND DEEPSEEKR1_PKG23_RMS_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i_plus_3}_arg0.data
+    ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i_plus_4}_arg0.data
   )
 endforeach()
 
-# Package 2: MHA arg0, MLP arg0
+# ------------------------------------------------------------------------------
+# Package 2: rank1 parameters -> arg0
+# Corresponding to rank=1, so (rank - 1) = 0
+#   MHA0: prefill{i}_arg0.data,     i = 2, 9, 16, ...
+#   MHA1: prefill{i+1}_arg0.data
+#   MLP : prefill{i}_arg0.data,     i = 6, 13, 20, ...
+# ------------------------------------------------------------------------------
 set(DEEPSEEKR1_PKG2_PARAM_FILES ${DEEPSEEKR1_PKG23_RMS_FILES})
-foreach(i 2 8 14 20 26 32 38 44 50 56 62 68 74 80 86 92 98 104 110 116 122 128 134 140 146 152 158 164)
+
+# MHA0 + MHA1
+foreach(i RANGE 2 191 7)
   list(APPEND DEEPSEEKR1_PKG2_PARAM_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i}_arg0.data
   )
-  math(EXPR i_plus_3 "${i} + 3")
+  math(EXPR i_plus_1 "${i} + 1")
   list(APPEND DEEPSEEKR1_PKG2_PARAM_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i_plus_3}_arg0.data
+    ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i_plus_1}_arg0.data
   )
 endforeach()
 
-# Package 3: MHA arg1, MLP arg1
+# MLP
+foreach(i RANGE 6 195 7)
+  list(APPEND DEEPSEEKR1_PKG2_PARAM_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i}_arg0.data
+  )
+endforeach()
+
+# ------------------------------------------------------------------------------
+# Package 3: rank2 parameters -> arg1
+# Corresponding to rank=2, so (rank - 1) = 1
+#   MHA0: prefill{i}_arg1.data,     i = 2, 9, 16, ...
+#   MHA1: prefill{i+1}_arg1.data
+#   MLP : prefill{i}_arg1.data,     i = 6, 13, 20, ...
+# ------------------------------------------------------------------------------
 set(DEEPSEEKR1_PKG3_PARAM_FILES ${DEEPSEEKR1_PKG23_RMS_FILES})
-foreach(i 2 8 14 20 26 32 38 44 50 56 62 68 74 80 86 92 98 104 110 116 122 128 134 140 146 152 158 164)
+
+# MHA0 + MHA1
+foreach(i RANGE 2 191 7)
   list(APPEND DEEPSEEKR1_PKG3_PARAM_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i}_arg1.data
   )
-  math(EXPR i_plus_3 "${i} + 3")
+  math(EXPR i_plus_1 "${i} + 1")
   list(APPEND DEEPSEEKR1_PKG3_PARAM_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i_plus_3}_arg1.data
+    ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i_plus_1}_arg1.data
+  )
+endforeach()
+
+# MLP
+foreach(i RANGE 6 195 7)
+  list(APPEND DEEPSEEKR1_PKG3_PARAM_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${i}_arg1.data
   )
 endforeach()
 

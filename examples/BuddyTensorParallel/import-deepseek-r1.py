@@ -172,15 +172,17 @@ graph_decode.group_map_device["subgraph0_decode"] = DeviceType.CPU
 DECODE_STRATEGY = SplitStrategy(
     name="decode",
     parallel_num=2,
-    ops_count=[6, 42, 2, 6, 11, 2],
+    ops_count=[6, 14, 28, 2, 6, 11, 2],
     stage_boundary_op=PowOp,
     stage_boundary_op_num = 57,
     paral_input_positions={
         0: [-1, -1, -1, -1],
-        169: [-1, -1, -1],
+        197: [-1, -1, -1],
         "default": [
             [-1, -1],
-            [1, 0, 1, 0, 1, 0, 0, -1, 1, 1, -1, -1, -1, -1],
+            # [1, 0, 1, 0, 1, 0, 0, -1, 1, 1, -1, -1, -1, -1],
+            [1,0,1,0,1,0,-1,],
+            [0,-1,1,1,-1,-1,-1,1,1,2],
             [-1, -1],
             [-1, -1],
             [1, 1, 0, -1],
@@ -192,20 +194,25 @@ DECODE_STRATEGY = SplitStrategy(
 PREFILL_STRATEGY = SplitStrategy(
     name="prefill",
     parallel_num=2,
-    ops_count=[6, 51, 2, 6, 11, 2],
+    ops_count=[6, 15, 36, 2, 6, 11, 2],
     stage_boundary_op=PowOp,
     stage_boundary_op_num = 57 ,
     paral_input_positions={
         0: [-1, -1, -1],
-        169: [-1, -1, -1],
+        197: [-1, -1, -1],
         "default": [
             [-1, 1],
-            [1,0,1,0,1,0,0,-1,-1,-1,-1],
+            # [1,0,1,0,1,0,0,-1,-1,-1,-1],
+            [1,0,1,0,1,0,-1],
+            [0,-1,-1,-1,1,1,1],
             [1, 0],
             [-1, 1], [1, 1, 0, -1],[1, 0]
         ]
     }
 )
+
+# driver_prefill = PartitionedGraphDriver(graphs_prefill[0])
+# driver_prefill.subgraphs[0].lower_to_top_level_ir()
 
 driver_prefill = PartitionedGraphDriver(graphs_prefill[0], PREFILL_STRATEGY)
 for i in range(len(driver_prefill.subgraphs)):
@@ -229,3 +236,6 @@ for i in range(len(driver_decode.subgraphs)):
         print(driver_decode.subgraphs[i]._imported_module, file=module_file)
     with open(os.path.join(output_dir, f"forward_decode{i}.mlir"), "w") as module_file:
         print(driver_decode.modules[i], file=module_file)
+        
+# for entry in driver_decode._subgraph_param_info.items():
+#     driver_decode.construct_sub_params(params, entry, output_dir)
