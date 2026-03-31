@@ -412,8 +412,6 @@ set(SUBGRAPH_PASSES_VEC_UNROLL_OMP
   -cse
   -canonicalize
   -optimize-allocation-liveness
-  -assume-tight-memref-layout
-  -staticize-memref-layout  
   -matmul-vectorization
   -batchmatmul-optimize
   -batchmatmul-transpose-b-vectorization
@@ -453,8 +451,6 @@ set(SUBGRAPH_PASSES_RVV_K64_OMP
   -cse
   -canonicalize
   -optimize-allocation-liveness
-  -assume-tight-memref-layout
-  -staticize-memref-layout
   "-matmul-rvv=vector-size=64 k-block-size=64"
   -batchmatmul-optimize
   -batchmatmul-transpose-b-vectorization
@@ -534,7 +530,7 @@ set(SUBGRAPH_DECODE_PASSES_RVV_K64
   -optimize-allocation-liveness
   -assume-tight-memref-layout
   -staticize-memref-layout
-  "-matmul-rvv=vector-size=64 k-block-size=64"
+  -matmul-rvv=vector-size=64 k-block-size=64
   -batch-matmul-vectorization-decode=vector-size=128
   -batchmatmul-transpose-b-vectorization=vector-size=16
   -convert-linalg-to-affine-loops
@@ -573,7 +569,7 @@ set(SUBGRAPH_DECODE_PASSES_RVV_K16
   -optimize-allocation-liveness
   -assume-tight-memref-layout
   -staticize-memref-layout
-  "-matmul-rvv=vector-size=64 k-block-size=16"
+  -matmul-rvv=vector-size=64 k-block-size=16
   -batch-matmul-vectorization-decode=vector-size=128
   -batchmatmul-transpose-b-vectorization=vector-size=16
   -convert-linalg-to-affine-loops
@@ -625,7 +621,6 @@ function(build_subgraph_prefill N)
       set(SUBGRAPH_PASSES_SELECTED ${SUBGRAPH_PASSES_RVV_K64_OMP})
     endif()
   else()
-      # set(SUBGRAPH_PASSES_SELECTED ${SUBGRAPH_PASSES_RVV_K64_OMP})
     set(SUBGRAPH_PASSES_SELECTED ${SUBGRAPH_PASSES})
   endif()
 
@@ -665,10 +660,12 @@ endfunction()
 function(build_subgraph_decode N)
   if(CROSS_COMPILE_RVV)
     if("${N}" STREQUAL "2" OR "${N}" STREQUAL "3")
-      set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K64})
+    set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES})
+      # set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K64})
     else()
       # subgraph6、subgraph197，以及其余 decode 子图都用 k16
-      set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K16})
+    set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES})
+      # set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K16})
     endif()
   else()
     set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES})
