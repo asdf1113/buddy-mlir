@@ -203,7 +203,7 @@ else()
   )
 
   set(DSTP_EXAMPLE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
-  set(DSTP_EXAMPLE_BUILD_PATH /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329)
+  set(DSTP_EXAMPLE_BUILD_PATH /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260401-169)
 endif()
 
 # ==============================================================================
@@ -290,30 +290,26 @@ add_dependencies(mpich_cxx mpich_ep)
 #   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode1.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode2.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode3.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode4.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode6.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode197.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode5.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_decode169.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode0.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode1.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode2.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode3.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode4.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode6.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode197.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode5.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode169.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill0.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill1.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill2.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill3.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill4.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill6.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill197.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill5.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill169.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill0.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill1.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill2.mlir
 #   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill3.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill4.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill6.mlir
-#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill197.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill5.mlir
+#   ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill169.mlir
 #   COMMAND ${Python3_EXECUTABLE}
 #   ${CMAKE_CURRENT_SOURCE_DIR}/import-deepseek-r1.py
 #   --output-dir ${CMAKE_CURRENT_BINARY_DIR}
@@ -412,8 +408,6 @@ set(SUBGRAPH_PASSES_VEC_UNROLL_OMP
   -cse
   -canonicalize
   -optimize-allocation-liveness
-  -assume-tight-memref-layout
-  -staticize-memref-layout  
   -matmul-vectorization
   -batchmatmul-optimize
   -batchmatmul-transpose-b-vectorization
@@ -453,8 +447,6 @@ set(SUBGRAPH_PASSES_RVV_K64_OMP
   -cse
   -canonicalize
   -optimize-allocation-liveness
-  -assume-tight-memref-layout
-  -staticize-memref-layout
   "-matmul-rvv=vector-size=64 k-block-size=64"
   -batchmatmul-optimize
   -batchmatmul-transpose-b-vectorization
@@ -534,7 +526,7 @@ set(SUBGRAPH_DECODE_PASSES_RVV_K64
   -optimize-allocation-liveness
   -assume-tight-memref-layout
   -staticize-memref-layout
-  "-matmul-rvv=vector-size=64 k-block-size=64"
+  -matmul-rvv=vector-size=64 k-block-size=64
   -batch-matmul-vectorization-decode=vector-size=128
   -batchmatmul-transpose-b-vectorization=vector-size=16
   -convert-linalg-to-affine-loops
@@ -573,7 +565,7 @@ set(SUBGRAPH_DECODE_PASSES_RVV_K16
   -optimize-allocation-liveness
   -assume-tight-memref-layout
   -staticize-memref-layout
-  "-matmul-rvv=vector-size=64 k-block-size=16"
+  -matmul-rvv=vector-size=64 k-block-size=16
   -batch-matmul-vectorization-decode=vector-size=128
   -batchmatmul-transpose-b-vectorization=vector-size=16
   -convert-linalg-to-affine-loops
@@ -603,7 +595,7 @@ set(SUBGRAPH_DECODE_PASSES_RVV_K16
 function(build_forward_prefill N)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill${N}.o
-    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/forward_prefill${N}.mlir
+    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/build_20260315/examples/BuddyTensorParallel/forward_prefill${N}.mlir
     -simplify-tosa-reshape |
     ${LLVM_TOOLS_BIN_DIR}/mlir-opt -pass-pipeline ${TOSA_PIPELINE} |
     ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${FORWARD_PASSES} |
@@ -611,7 +603,7 @@ function(build_forward_prefill N)
     ${LLVM_TOOLS_BIN_DIR}/llvm-as |
     ${LLVM_TOOLS_BIN_DIR}/llc ${LLC_TARGET_FLAGS} -filetype=obj -relocation-model=pic -O3
     -o ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill${N}.o
-    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/forward_prefill${N}.mlir
+    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/build_20260315/examples/BuddyTensorParallel/forward_prefill${N}.mlir
     COMMENT "Building forward_prefill${N}.o"
     VERBATIM
   )
@@ -625,13 +617,12 @@ function(build_subgraph_prefill N)
       set(SUBGRAPH_PASSES_SELECTED ${SUBGRAPH_PASSES_RVV_K64_OMP})
     endif()
   else()
-      # set(SUBGRAPH_PASSES_SELECTED ${SUBGRAPH_PASSES_RVV_K64_OMP})
     set(SUBGRAPH_PASSES_SELECTED ${SUBGRAPH_PASSES})
   endif()
 
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${N}.o
-    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/subgraph0_prefill${N}.mlir
+    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/build_20260315/examples/BuddyTensorParallel/subgraph0_prefill${N}.mlir
     -simplify-tosa-reshape |
     ${LLVM_TOOLS_BIN_DIR}/mlir-opt -pass-pipeline ${TOSA_PIPELINE} |
     ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${SUBGRAPH_PASSES_SELECTED} |
@@ -639,7 +630,7 @@ function(build_subgraph_prefill N)
     ${LLVM_TOOLS_BIN_DIR}/llvm-as |
     ${LLVM_TOOLS_BIN_DIR}/llc ${LLC_TARGET_FLAGS} -filetype=obj -relocation-model=pic -O3
     -o ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill${N}.o
-    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/subgraph0_prefill${N}.mlir
+    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/build_20260315/examples/BuddyTensorParallel/subgraph0_prefill${N}.mlir
     COMMENT "Building subgraph0_prefill${N}.o"
     VERBATIM
   )
@@ -648,7 +639,7 @@ endfunction()
 function(build_forward_decode N)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/forward_decode${N}.o
-    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/forward_decode${N}.mlir
+    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/build_20260315/examples/BuddyTensorParallel/forward_decode${N}.mlir
     -simplify-tosa-reshape |
     ${LLVM_TOOLS_BIN_DIR}/mlir-opt -pass-pipeline ${TOSA_PIPELINE} |
     ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${FORWARD_PASSES} |
@@ -656,7 +647,7 @@ function(build_forward_decode N)
     ${LLVM_TOOLS_BIN_DIR}/llvm-as |
     ${LLVM_TOOLS_BIN_DIR}/llc ${LLC_TARGET_FLAGS} -filetype=obj -relocation-model=pic -O3
     -o ${CMAKE_CURRENT_BINARY_DIR}/forward_decode${N}.o
-    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/forward_decode${N}.mlir
+    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/build_20260315/examples/BuddyTensorParallel/forward_decode${N}.mlir
     COMMENT "Building forward_decode${N}.o"
     VERBATIM
   )
@@ -665,10 +656,12 @@ endfunction()
 function(build_subgraph_decode N)
   if(CROSS_COMPILE_RVV)
     if("${N}" STREQUAL "2" OR "${N}" STREQUAL "3")
-      set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K64})
+    set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES})
+      # set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K64})
     else()
       # subgraph6、subgraph197，以及其余 decode 子图都用 k16
-      set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K16})
+    set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES})
+      # set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K16})
     endif()
   else()
     set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES})
@@ -677,7 +670,7 @@ function(build_subgraph_decode N)
 
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode${N}.o
-    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/subgraph0_decode${N}.mlir
+    COMMAND ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/build_20260315/examples/BuddyTensorParallel/subgraph0_decode${N}.mlir
     -simplify-tosa-reshape -simplify-tosa-matmul-scalar |
     ${LLVM_TOOLS_BIN_DIR}/mlir-opt -pass-pipeline ${TOSA_PIPELINE} |
     ${BUDDY_TOOLS_BINARY_DIR}/buddy-opt ${SUBGRAPH_DECODE_PASSES_SELECTED} |
@@ -685,7 +678,7 @@ function(build_subgraph_decode N)
     ${LLVM_TOOLS_BIN_DIR}/llvm-as |
     ${LLVM_TOOLS_BIN_DIR}/llc ${LLC_TARGET_FLAGS} -filetype=obj -relocation-model=pic -O3
     -o ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode${N}.o
-    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260329/subgraph0_decode${N}.mlir
+    DEPENDS ${BUDDY_OPT_DEP} /home/lishiyang/split/buddy-mlir/build_20260315/examples/BuddyTensorParallel/subgraph0_decode${N}.mlir
     COMMENT "Building subgraph0_decode${N}.o"
     VERBATIM
   )
@@ -694,7 +687,7 @@ endfunction()
 # ==============================================================================
 # Build libraries
 # ==============================================================================
-foreach(N 0 1 2 3 4 6 197)
+foreach(N 0 1 2 3 5 169)
   build_forward_prefill(${N})
   build_subgraph_prefill(${N})
   add_library(DSR1TP_prefill${N} STATIC
@@ -710,9 +703,9 @@ endforeach()
 
 set_target_properties(
   DSR1TP_prefill0 DSR1TP_prefill1 DSR1TP_prefill2
-  DSR1TP_prefill3 DSR1TP_prefill4 DSR1TP_prefill6 DSR1TP_prefill197
+  DSR1TP_prefill3 DSR1TP_prefill5 DSR1TP_prefill169
   DSR1TP_decode0 DSR1TP_decode1 DSR1TP_decode2
-  DSR1TP_decode3 DSR1TP_decode4 DSR1TP_decode6 DSR1TP_decode197
+  DSR1TP_decode3 DSR1TP_decode5 DSR1TP_decode169
   PROPERTIES
   LINKER_LANGUAGE C
 )
@@ -720,13 +713,13 @@ set_target_properties(
 # ==============================================================================
 # Final executable
 # ==============================================================================
-add_executable(buddy-deepseek-r1-distributed buddy-deepseek-test.cpp)
+add_executable(buddy-deepseek-r1-distributed buddy-deepseek-test-or.cpp)
 
 add_dependencies(buddy-deepseek-r1-distributed mpich_ep)
 
 target_compile_definitions(buddy-deepseek-r1-distributed PRIVATE
   DEEPSEEKR1_EXAMPLE_PATH="${DSTP_EXAMPLE_PATH}/"
-  DEEPSEEKR1_EXAMPLE_BUILD_PATH="${DSTP_EXAMPLE_BUILD_PATH}/"
+  DEEPSEEKR1_EXAMPLE_BUILD_PATH="/home/lishiyang/split/buddy-mlir/build_20260315/examples/BuddyTensorParallel/"
 )
 
 target_include_directories(buddy-deepseek-r1-distributed PRIVATE
@@ -742,16 +735,14 @@ target_link_libraries(buddy-deepseek-r1-distributed PRIVATE
   DSR1TP_prefill1
   DSR1TP_prefill2
   DSR1TP_prefill3
-  DSR1TP_prefill4
-  DSR1TP_prefill6
-  DSR1TP_prefill197
+  DSR1TP_prefill5
+  DSR1TP_prefill169
   DSR1TP_decode0
   DSR1TP_decode1
   DSR1TP_decode2
   DSR1TP_decode3
-  DSR1TP_decode4
-  DSR1TP_decode6
-  DSR1TP_decode197
+  DSR1TP_decode5
+  DSR1TP_decode169
   "${MLIR_RUNNER_UTILS_LIB}"
   "${OPENMP_LIB}"
   mpich_cxx

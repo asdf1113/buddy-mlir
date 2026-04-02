@@ -1,3 +1,5 @@
+//===-mha23.cpp--------------------------------------===//
+
 #include <algorithm>
 #include <array>
 #include <buddy/Core/Container.h>
@@ -39,8 +41,6 @@ constexpr int PrefillAuxMask = 101;
 constexpr int PrefillAuxCos = 102;
 constexpr int PrefillAuxSin = 103;
 constexpr int PrefillReturnHidden = 104;
-constexpr int PrefillMlpRms = 105;
-constexpr int PrefillMlpPartial = 106;
 constexpr int DecodePacketA = 200;
 constexpr int DecodePacketB = 201;
 } // namespace CommTag
@@ -500,12 +500,6 @@ int findMaxIndex(const float *start, const float *end) {
   return std::distance(start, std::max_element(start, end));
 }
 
-void addInPlace(float *dst, const float *src, size_t n) {
-  for (size_t i = 0; i < n; ++i) {
-    dst[i] += src[i];
-  }
-}
-
 // -----------------------------------------------------------------------------
 // DeepSeekR1 Inference Main Entry
 // -----------------------------------------------------------------------------
@@ -588,11 +582,6 @@ int main(int argc, char *argv[]) {
     MemRef<float, 3> sub3DContainer({1, SubMaxTokenLength, HiddenSize0});
     MemRef<float, 2> tmp2DContainer({MaxTokenLength, HiddenSize0});
     MemRef<float, 2> sub2DContainer({SubMaxTokenLength, HiddenSize0});
-    MemRef<float, 3> mlpPeerRms3D({1, SubMaxTokenLength, HiddenSize0});
-    MemRef<float, 2> mlpPeerPartial2D({SubMaxTokenLength, HiddenSize0});
-    MemRef<float, 2> mlpRecvOwnPartial2D({SubMaxTokenLength, HiddenSize0});
-    MemRef<float, 3> mlpLocalRmsSend3D({1, SubMaxTokenLength, HiddenSize0});
-    
     std::vector<MemRef<float, 4>> kv0;
     kv0.reserve(56);
     for (int i = 0; i < 56; ++i) {
@@ -797,80 +786,42 @@ int main(int argc, char *argv[]) {
                                     &sub2DContainer);
       addStage(metrics.prefill, "prefill", "compute",
                "rank1.prefill.forward_prefill4.add1", elapsedSeconds(t0));
-/////////
+
       t0 = SteadyClock::now();
       _mlir_ciface_forward_prefill1(&sub3DContainer, &paramsContainersRMS0[m],
                                     &subResultContainer);
       addStage(metrics.prefill, "prefill", "compute",
                "rank1.prefill.forward_prefill1.rms2", elapsedSeconds(t0));
+      rmsPtr = sub3DContainer.getData();
 
-      MPI_Request mlp_rms_send_req = MPI_REQUEST_NULL;
-      MPI_Request mlp_rms_recv_req = MPI_REQUEST_NULL;
-      MPI_Request mlp_partial_send_req = MPI_REQUEST_NULL;
-      MPI_Request mlp_partial_recv_req = MPI_REQUEST_NULL;
+      if (comm_sub != MPI_COMM_NULL) {
+        t0 = SteadyClock::now();
+        MPI_Allgather(rmsPtr, subSize, MPI_FLOAT, tmp3DMemRef.getData(),
+                      subSize, MPI_FLOAT, comm_sub);
+        addStage(metrics.prefill, "prefill", "collective",
+                 "rank1.prefill.allgather_before_mlp", elapsedSeconds(t0));
+      }
 
       t0 = SteadyClock::now();
-      MPI_Isend(sub3DContainer.getData(), subSize, MPI_FLOAT, peerRank,
-                CommTag::PrefillMlpRms, MPI_COMM_WORLD, &mlp_rms_send_req);
-      MPI_Irecv(mlpPeerRms3D.getData(), subSize, MPI_FLOAT, peerRank,
-                CommTag::PrefillMlpRms, MPI_COMM_WORLD, &mlp_rms_recv_req);
-      MPI_Irecv(mlpRecvOwnPartial2D.getData(), subSize, MPI_FLOAT, peerRank,
-                CommTag::PrefillMlpPartial, MPI_COMM_WORLD,
-                &mlp_partial_recv_req);
-      addStage(metrics.prefill, "prefill", "p2p",
-               "rank1.prefill.start_mlp_rms_exchange", elapsedSeconds(t0));
-
-      // 先计算本地 512 token 的 MLP partial
-      t0 = SteadyClock::now();
-      _mlir_ciface_forward_prefill6(&sub2DContainer, &paramsContainersMLP[m],
-                                    &sub3DContainer);
+      _mlir_ciface_forward_prefill6(&tmp2DContainer, &paramsContainersMLP[m],
+                                    &tmp3DMemRef);
       addStage(metrics.prefill, "prefill", "compute",
-               "rank1.prefill.forward_prefill6.mlp_local", elapsedSeconds(t0));
+               "rank1.prefill.forward_prefill6.mlp", elapsedSeconds(t0));
+      mhaOutputPtr = tmp2DContainer.getData();
 
-      // 等对端 RMS 到达后，再计算对端 512 token 的 MLP partial
-      t0 = SteadyClock::now();
-      MPI_Wait(&mlp_rms_recv_req, MPI_STATUS_IGNORE);
-      addStage(metrics.prefill, "prefill", "wait",
-               "rank1.prefill.wait_peer_mlp_rms", elapsedSeconds(t0));
-
-      t0 = SteadyClock::now();
-      _mlir_ciface_forward_prefill6(&mlpPeerPartial2D, &paramsContainersMLP[m],
-                                    &mlpPeerRms3D);
-      addStage(metrics.prefill, "prefill", "compute",
-               "rank1.prefill.forward_prefill6.mlp_peer", elapsedSeconds(t0));
-
-      // 把“对端 token 的 partial output”发给对端
-      t0 = SteadyClock::now();
-      MPI_Isend(mlpPeerPartial2D.getData(), subSize, MPI_FLOAT, peerRank,
-                CommTag::PrefillMlpPartial, MPI_COMM_WORLD,
-                &mlp_partial_send_req);
-      addStage(metrics.prefill, "prefill", "p2p",
-               "rank1.prefill.isend_peer_mlp_partial", elapsedSeconds(t0));
-
-      // 等待对端发来“我本地 token 的 partial output”，然后做 TP 求和
-      t0 = SteadyClock::now();
-      MPI_Wait(&mlp_partial_recv_req, MPI_STATUS_IGNORE);
-      addStage(metrics.prefill, "prefill", "wait",
-               "rank1.prefill.wait_peer_mlp_partial", elapsedSeconds(t0));
-
-      t0 = SteadyClock::now();
-      addInPlace(sub2DContainer.getData(), mlpRecvOwnPartial2D.getData(),
-                 static_cast<size_t>(subSize));
-      addStage(metrics.prefill, "prefill", "compute",
-               "rank1.prefill.add_mlp_partial", elapsedSeconds(t0));
-
-      t0 = SteadyClock::now();
-      MPI_Request mlp_send_waits[2] = {mlp_rms_send_req, mlp_partial_send_req};
-      MPI_Waitall(2, mlp_send_waits, MPI_STATUSES_IGNORE);
-      addStage(metrics.prefill, "prefill", "wait",
-               "rank1.prefill.wait_mlp_send_complete", elapsedSeconds(t0));
+      if (comm_sub != MPI_COMM_NULL) {
+        t0 = SteadyClock::now();
+        MPI_Reduce_scatter_block(mhaOutputPtr, sub2DPtr, subSize, MPI_FLOAT,
+                                 MPI_SUM, comm_sub);
+        addStage(metrics.prefill, "prefill", "collective",
+                 "rank1.prefill.reduce_scatter_after_mlp", elapsedSeconds(t0));
+      }
 
       t0 = SteadyClock::now();
       _mlir_ciface_forward_prefill4(&subResultContainer, &subResultContainer,
                                     &sub2DContainer);
       addStage(metrics.prefill, "prefill", "compute",
                "rank1.prefill.forward_prefill4.add2", elapsedSeconds(t0));
-///////////////
     }
 
     t0 = SteadyClock::now();
@@ -1174,11 +1125,6 @@ int main(int argc, char *argv[]) {
     MemRef<float, 3> tmp3DMemRef({1, MaxTokenLength, HiddenSize0});
     MemRef<float, 2> tmp2DContainer({MaxTokenLength, HiddenSize0});
     MemRef<float, 2> sub2DContainer({SubMaxTokenLength, HiddenSize0});
-    MemRef<float, 3> mlpPeerRms3D({1, SubMaxTokenLength, HiddenSize0});
-    MemRef<float, 2> mlpPeerPartial2D({SubMaxTokenLength, HiddenSize0});
-    MemRef<float, 2> mlpRecvOwnPartial2D({SubMaxTokenLength, HiddenSize0});
-    MemRef<float, 3> mlpLocalRmsSend3D({1, SubMaxTokenLength, HiddenSize0});
-
     std::vector<MemRef<float, 4>> kv0;
     kv0.reserve(56);
     for (int i = 0; i < 56; ++i) {
@@ -1351,80 +1297,42 @@ int main(int argc, char *argv[]) {
       addStage(metrics.prefill, "prefill", "compute",
                "rank2.prefill.forward_prefill4.add1", elapsedSeconds(t0));
 
-  ///////////////// ////////////////
       t0 = SteadyClock::now();
       _mlir_ciface_forward_prefill1(&sub3DContainer, &paramsContainersRMS0[m],
                                     &subResultContainer);
       addStage(metrics.prefill, "prefill", "compute",
                "rank2.prefill.forward_prefill1.rms2", elapsedSeconds(t0));
+      rmsPtr = sub3DContainer.getData();
 
-      MPI_Request mlp_rms_send_req = MPI_REQUEST_NULL;
-      MPI_Request mlp_rms_recv_req = MPI_REQUEST_NULL;
-      MPI_Request mlp_partial_send_req = MPI_REQUEST_NULL;
-      MPI_Request mlp_partial_recv_req = MPI_REQUEST_NULL;
+      if (comm_sub != MPI_COMM_NULL) {
+        t0 = SteadyClock::now();
+        MPI_Allgather(rmsPtr, subSize, MPI_FLOAT, tmp3DMemRef.getData(),
+                      subSize, MPI_FLOAT, comm_sub);
+        addStage(metrics.prefill, "prefill", "collective",
+                 "rank2.prefill.allgather_before_mlp", elapsedSeconds(t0));
+      }
 
       t0 = SteadyClock::now();
-      MPI_Isend(sub3DContainer.getData(), subSize, MPI_FLOAT, nextRank,
-                CommTag::PrefillMlpRms, MPI_COMM_WORLD, &mlp_rms_send_req);
-      MPI_Irecv(mlpPeerRms3D.getData(), subSize, MPI_FLOAT, source,
-                CommTag::PrefillMlpRms, MPI_COMM_WORLD, &mlp_rms_recv_req);
-      MPI_Irecv(mlpRecvOwnPartial2D.getData(), subSize, MPI_FLOAT, source,
-                CommTag::PrefillMlpPartial, MPI_COMM_WORLD,
-                &mlp_partial_recv_req);
-      addStage(metrics.prefill, "prefill", "p2p",
-               "rank2.prefill.start_mlp_rms_exchange", elapsedSeconds(t0));
-
-      // 先计算本地 512 token 的 MLP partial
-      t0 = SteadyClock::now();
-      _mlir_ciface_forward_prefill6(&sub2DContainer, &paramsContainersMLP[m],
-                                    &sub3DContainer);
+      _mlir_ciface_forward_prefill6(&tmp2DContainer, &paramsContainersMLP[m],
+                                    &tmp3DMemRef);
       addStage(metrics.prefill, "prefill", "compute",
-               "rank2.prefill.forward_prefill6.mlp_local", elapsedSeconds(t0));
+               "rank2.prefill.forward_prefill6.mlp", elapsedSeconds(t0));
+      mhaOutputPtr = tmp2DContainer.getData();
 
-      // 等对端 RMS 到达后，再计算对端 512 token 的 MLP partial
-      t0 = SteadyClock::now();
-      MPI_Wait(&mlp_rms_recv_req, MPI_STATUS_IGNORE);
-      addStage(metrics.prefill, "prefill", "wait",
-               "rank2.prefill.wait_peer_mlp_rms", elapsedSeconds(t0));
-
-      t0 = SteadyClock::now();
-      _mlir_ciface_forward_prefill6(&mlpPeerPartial2D, &paramsContainersMLP[m],
-                                    &mlpPeerRms3D);
-      addStage(metrics.prefill, "prefill", "compute",
-               "rank2.prefill.forward_prefill6.mlp_peer", elapsedSeconds(t0));
-
-      // 把“对端 token 的 partial output”发给对端
-      t0 = SteadyClock::now();
-      MPI_Isend(mlpPeerPartial2D.getData(), subSize, MPI_FLOAT, nextRank,
-                CommTag::PrefillMlpPartial, MPI_COMM_WORLD,
-                &mlp_partial_send_req);
-      addStage(metrics.prefill, "prefill", "p2p",
-               "rank2.prefill.isend_peer_mlp_partial", elapsedSeconds(t0));
-
-      // 等待对端发来“我本地 token 的 partial output”，然后做 TP 求和
-      t0 = SteadyClock::now();
-      MPI_Wait(&mlp_partial_recv_req, MPI_STATUS_IGNORE);
-      addStage(metrics.prefill, "prefill", "wait",
-               "rank2.prefill.wait_peer_mlp_partial", elapsedSeconds(t0));
-
-      t0 = SteadyClock::now();
-      addInPlace(sub2DContainer.getData(), mlpRecvOwnPartial2D.getData(),
-                 static_cast<size_t>(subSize));
-      addStage(metrics.prefill, "prefill", "compute",
-               "rank2.prefill.add_mlp_partial", elapsedSeconds(t0));
-
-      t0 = SteadyClock::now();
-      MPI_Request mlp_send_waits[2] = {mlp_rms_send_req, mlp_partial_send_req};
-      MPI_Waitall(2, mlp_send_waits, MPI_STATUSES_IGNORE);
-      addStage(metrics.prefill, "prefill", "wait",
-               "rank2.prefill.wait_mlp_send_complete", elapsedSeconds(t0));
+      if (comm_sub != MPI_COMM_NULL) {
+        t0 = SteadyClock::now();
+        MPI_Reduce_scatter_block(mhaOutputPtr, sub2DPtr, subSize, MPI_FLOAT,
+                                 MPI_SUM, comm_sub);
+        addStage(metrics.prefill, "prefill", "collective",
+                 "rank2.prefill.reduce_scatter_after_mlp", elapsedSeconds(t0));
+      }
 
       t0 = SteadyClock::now();
       _mlir_ciface_forward_prefill4(&subResultContainer, &subResultContainer,
                                     &sub2DContainer);
       addStage(metrics.prefill, "prefill", "compute",
                "rank2.prefill.forward_prefill4.add2", elapsedSeconds(t0));
-////////////////////////
+
       if (m == (times - 1)) {
         subResultPtr = subResultContainer.getData();
         t0 = SteadyClock::now();

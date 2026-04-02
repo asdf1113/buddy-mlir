@@ -172,7 +172,8 @@ graph_decode.group_map_device["subgraph0_decode"] = DeviceType.CPU
 DECODE_STRATEGY = SplitStrategy(
     name="decode",
     parallel_num=2,
-    ops_count=[6, 14, 28, 2, 6, 11, 2],
+    ops_count=[6, 42, 2, 6, 11, 2],
+    # ops_count=[6, 14, 28, 2, 6, 11, 2],
     stage_boundary_op=PowOp,
     stage_boundary_op_num = 57,
     paral_input_positions={
@@ -180,9 +181,9 @@ DECODE_STRATEGY = SplitStrategy(
         197: [-1, -1, -1],
         "default": [
             [-1, -1],
-            # [1, 0, 1, 0, 1, 0, 0, -1, 1, 1, -1, -1, -1, -1],
-            [1,0,1,0,1,0,-1,],
-            [0,-1,1,1,-1,-1,-1,1,1,2],
+            [1, 0, 1, 0, 1, 0, 0, -1, 1, 1, -1, -1, -1, -1],
+            # [1,0,1,0,1,0,-1,],
+            # [0,-1,1,1,-1,-1,-1,1,1,2],
             [-1, -1],
             [-1, -1],
             [1, 1, 0, -1],
@@ -194,7 +195,8 @@ DECODE_STRATEGY = SplitStrategy(
 PREFILL_STRATEGY = SplitStrategy(
     name="prefill",
     parallel_num=2,
-    ops_count=[6, 15, 36, 2, 6, 11, 2],
+    ops_count=[6, 51, 2, 6, 11, 2],
+    # ops_count=[6, 15, 36, 2, 6, 11, 2],
     stage_boundary_op=PowOp,
     stage_boundary_op_num = 57 ,
     paral_input_positions={
@@ -202,11 +204,11 @@ PREFILL_STRATEGY = SplitStrategy(
         197: [-1, -1, -1],
         "default": [
             [-1, 1],
-            # [1,0,1,0,1,0,0,-1,-1,-1,-1],
-            [1,0,1,0,1,0,-1],
-            [0,-1,-1,-1,1,1,1],
+            [1,0,1,0,1,0,0,-1,-1,-1,-1],
+            # [1,0,1,0,1,0,-1],
+            # [0,-1,-1,-1,1,1,1],
             [1, 0],
-            [-1, 1], [1, 1, 0, 1],[1, 0]
+            [-1, 1], [1, 1, 0, -1],[1, 0]
         ]
     }
 )
