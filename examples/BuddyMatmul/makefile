@@ -1,5 +1,5 @@
 #!/bin/bash
-BUDDY_BUILD_DIR := ../../build/
+BUDDY_BUILD_DIR := /home/lishiyang/split/buddy-mlir/build_20260320_llama1B_rvv
 LLVM_BUILD_DIR := ../../llvm/build/
 BUDDY_OPT := ${BUDDY_BUILD_DIR}/bin/buddy-opt
 MLIR_OPT := ${LLVM_BUILD_DIR}/bin/mlir-opt

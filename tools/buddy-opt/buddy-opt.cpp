@@ -105,6 +105,7 @@ void registerSiLUFusionPass();
 void registerSimplifyTosaMatmulScalarPass();
 void registerEliminateMemRefCopyPass();
 void registerMatMulRVVPass();
+void registerMatMulVectorizationDecodeTilingPass();
 } // namespace buddy
 } // namespace mlir
 
@@ -162,6 +163,7 @@ int main(int argc, char **argv) {
   // Register eliminate redundant memref.copy pass.
   mlir::buddy::registerEliminateMemRefCopyPass();
   mlir::buddy::registerMatMulRVVPass();
+  mlir::buddy::registerMatMulVectorizationDecodeTilingPass();
   mlir::buddy::registerSiLUFusionPass();
   // Register gpu passes
   mlir::buddy::registerConvertMemcpyToGPUPass();

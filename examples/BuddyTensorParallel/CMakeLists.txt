@@ -597,6 +597,46 @@ set(SUBGRAPH_DECODE_PASSES_RVV_K16
   -reconcile-unrealized-casts
 )
 
+set(SUBGRAPH_DECODE_PASSES_RVV_U10
+  -eliminate-empty-tensors
+  -empty-tensor-to-alloc-tensor
+  -convert-elementwise-to-linalg
+  -one-shot-bufferize=${BUFFERIZE_SIMPLE_OPTS}
+  -expand-strided-metadata
+  -ownership-based-buffer-deallocation
+  -canonicalize
+  -buffer-deallocation-simplification
+  -bufferization-lower-deallocations
+  -cse
+  -canonicalize
+  -optimize-allocation-liveness
+  -assume-tight-memref-layout
+  -staticize-memref-layout
+  "-matmul-vectorization-decode=vector-size=64 unroll-factor=12"
+  -batch-matmul-vectorization-decode=vector-size=128
+  -batchmatmul-transpose-b-vectorization=vector-size=16
+  -convert-linalg-to-affine-loops
+  -convert-vector-to-scf
+  -lower-affine
+  -convert-scf-to-openmp=${OPENMP_NUM_THREADS}
+  -cse
+  -memref-expand
+  -arith-expand
+  -convert-vector-to-llvm
+  -convert-arith-to-llvm
+  -finalize-memref-to-llvm
+  -convert-scf-to-cf
+  -convert-cf-to-llvm
+  -llvm-request-c-wrappers
+  -convert-openmp-to-llvm
+  -convert-arith-to-llvm
+  -convert-math-to-llvm
+  -convert-math-to-libm
+  -convert-func-to-llvm
+  -reconcile-unrealized-casts
+)
+
+
 # ==============================================================================
 # Build helper functions
 # ==============================================================================
@@ -666,6 +706,8 @@ function(build_subgraph_decode N)
   if(CROSS_COMPILE_RVV)
     if("${N}" STREQUAL "2" OR "${N}" STREQUAL "3")
       set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K64})
+    elseif("${N}" STREQUAL "5")
+      set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_U10})
     else()
       # subgraph6、subgraph197，以及其余 decode 子图都用 k16
       set(SUBGRAPH_DECODE_PASSES_SELECTED ${SUBGRAPH_DECODE_PASSES_RVV_K16})
@@ -720,7 +762,7 @@ set_target_properties(
 # ==============================================================================
 # Final executable
 # ==============================================================================
-add_executable(buddy-deepseek-r1-distributed buddy-deepseek-r1-distributed.cpp)
+add_executable(buddy-deepseek-r1-distributed buddy-ds-test.cpp)
 
 add_dependencies(buddy-deepseek-r1-distributed mpich_ep)
 

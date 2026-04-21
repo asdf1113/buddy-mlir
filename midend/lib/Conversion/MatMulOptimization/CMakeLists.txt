@@ -1,4 +1,5 @@
 add_mlir_library(MatMulOptimization
+MatMulVectorizationDecodeTiling.cpp
   MatMulRVV.cpp 
   MatMulOptimize.cpp
   MatMulVectorization.cpp
@@ -38,4 +39,8 @@ add_mlir_library(MatMulBlisVectorization
 
 add_mlir_library(MatmulRVV
   MatMulRVV.cpp
+)
+
+add_mlir_library(MatMulVectorizationDecodeTiling
+  MatMulVectorizationDecodeTiling.cpp
 )

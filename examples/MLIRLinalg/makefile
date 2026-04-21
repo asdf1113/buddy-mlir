@@ -136,7 +136,14 @@ linalg-matmul-translate:
 	${MLIR_TRANSLATE} --mlir-to-llvmir -o log.ll
 
 linalg-matmul-run:
-	@${MLIR_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
+	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
+		"-matmul-rvv=vector-size=64 k-block-size=16" -convert-linalg-to-loops -lower-affine -convert-scf-to-cf -convert-cf-to-llvm \
+		-convert-vector-to-llvm -finalize-memref-to-llvm -convert-arith-to-llvm \
+		-convert-func-to-llvm -reconcile-unrealized-casts | \
+	${MLIR_CPU_RUNNER} ${OPT_FLAG} -e main -entry-point-result=void -shared-libs=${MLIR_RUNNER_UTILS} -shared-libs=${MLIR_C_RUNNER_UTILS}
+
+linalg-matmul-new-run:
+	@${BUDDY_OPT} logveccache.mlir ${MLIR_OPT_OPTIONS} \
 		-convert-linalg-to-loops -lower-affine -convert-scf-to-cf -convert-cf-to-llvm \
 		-convert-vector-to-llvm -finalize-memref-to-llvm -convert-arith-to-llvm \
 		-convert-func-to-llvm -reconcile-unrealized-casts | \
@@ -157,10 +164,62 @@ linalg-matmul-unroll-lower:
 		--matmul-vectorization \
 		-o ./logunroll.mlir
 
+matmul-dsdecode-lower:
+	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
+		--matmul-vectorization-decode=vector-size=32 \
+		-o ./logdsdecodeold.mlir
+
+# ${BUDDY_MLIR_BUILD_DIR}/bin/buddy-opt logveccache1.mlir -convert-linalg-to-affine-loops \
+# 		-affine-parallelize \
+# 		-lower-affine \
+# 		-convert-scf-to-openmp="num-threads=8" \
+# 		-convert-vector-to-scf \
+# 		-expand-strided-metadata \
+# 		-convert-vector-to-llvm \
+# 		-memref-expand \
+# 		-arith-expand \
+# 		-convert-arith-to-llvm \
+# 		-finalize-memref-to-llvm  \
+# 		-convert-scf-to-cf \
+# 		-convert-cf-to-llvm \
+# 		-convert-openmp-to-llvm \
+# 		-convert-math-to-llvm \
+# 		-convert-math-to-libm  \
+# 		-convert-func-to-llvm \
+# 		-reconcile-unrealized-casts | ${LLVM_MLIR_BUILD_DIR}/bin/mlir-translate -mlir-to-llvmir | ${LLVM_MLIR_BUILD_DIR}/bin/llvm-as | ${LLVM_MLIR_BUILD_DIR}/bin/llc   -mtriple=riscv64-unknown-linux-gnu   -target-abi=lp64d   -mattr=+m,+d,+v   -filetype=obj   -relocation-model=pic   -O3   -o logveccache.o && ${RISCV_GNU_TOOLCHAIN}/bin/riscv64-unknown-linux-gnu-g++   --sysroot=${RISCV_SYSROOT}   -march=rv64gcv   -mabi=lp64d   -fPIC   logveccache.o   -o logveccache1.riscv   ${BUDDY_MLIR_BUILD_CROSS_DIR}/lib/libStaticMLIRCRunnerUtils.a   ${RISCV_OMP_SHARED}   -ldl -lm -lpthread
+
+
 linalg-matmul-veccache-lower:
 	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
-		--matmul-rvv \
-		-o ./logveccache.mlir		
+		"-matmul-rvv=vector-size=64 k-block-size=16" \
+		-o ./logveccache.mlir
+
+
+linalg-matmul-vecunroll-lower:
+	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
+		"-matmul-vectorization-decode=vector-size=64 unroll-factor=8" \
+		-o ./logvecunroll.mlir		
+
+testold:
+	@${BUDDY_OPT} logveccache1.mlir ${MLIR_OPT_OPTIONS} \
+		-convert-linalg-to-loops -lower-affine -convert-scf-to-cf -convert-cf-to-llvm \
+		-convert-vector-to-llvm -finalize-memref-to-llvm -convert-arith-to-llvm \
+		-convert-func-to-llvm -reconcile-unrealized-casts | \
+	${MLIR_CPU_RUNNER} ${OPT_FLAG} -e main -entry-point-result=void -shared-libs=${MLIR_RUNNER_UTILS} -shared-libs=${MLIR_C_RUNNER_UTILS} -shared-libs=/home/lishiyang/split/buddy-mlir/llvm/build/lib/libomp.so
+
+testnew:
+	@${BUDDY_OPT} logdsdecode.mlir ${MLIR_OPT_OPTIONS} \
+		-convert-linalg-to-loops -lower-affine -convert-scf-to-cf -convert-cf-to-llvm \
+		-convert-vector-to-llvm -finalize-memref-to-llvm -convert-arith-to-llvm \
+		-convert-func-to-llvm -reconcile-unrealized-casts | \
+	${MLIR_CPU_RUNNER} ${OPT_FLAG} -e main -entry-point-result=void -shared-libs=${MLIR_RUNNER_UTILS} -shared-libs=${MLIR_C_RUNNER_UTILS}
+
+testunroll:
+	@${BUDDY_OPT} logvecunroll.mlir ${MLIR_OPT_OPTIONS} \
+		-convert-linalg-to-loops -lower-affine -convert-scf-to-cf -convert-cf-to-llvm \
+		-convert-vector-to-llvm -finalize-memref-to-llvm -convert-arith-to-llvm \
+		-convert-func-to-llvm -reconcile-unrealized-casts | \
+	${MLIR_CPU_RUNNER} ${OPT_FLAG} -e main -entry-point-result=void -shared-libs=${MLIR_RUNNER_UTILS} -shared-libs=${MLIR_C_RUNNER_UTILS}
 
 linalg-matmul-optimize-translate:
 	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
@@ -526,6 +585,11 @@ linalg-matmul-vectorization-lower:
 	@${BUDDY_OPT} linalg-matmul.mlir \
 		-matmul-vectorization \
 		-o log.mlir
+
+linalg-matmul-new-lower:
+	@${BUDDY_OPT} linalg-matmul.mlir \
+		-matmul-vectorization-decode-tiling \
+		-o logdecode1.mlir
 
 linalg-pooling-nhwc-max-run:
 	@${BUDDY_OPT} linalg-pooling-nhwc-max.mlir \
