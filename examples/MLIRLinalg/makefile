@@ -197,7 +197,7 @@ linalg-matmul-veccache-lower:
 
 linalg-matmul-vecunroll-lower:
 	@${BUDDY_OPT} linalg-matmul.mlir ${MLIR_OPT_OPTIONS} \
-		"-matmul-vectorization-decode=vector-size=64 unroll-factor=8" \
+		"-matmul-vectorization-decode=vector-size=64" \
 		-o ./logvecunroll.mlir		
 
 testold:

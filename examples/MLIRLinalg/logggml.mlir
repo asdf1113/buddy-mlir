@@ -32,9 +32,7 @@ module {
 
     // 外层并行遍历 src0 的每一行（每个输出通道）
     affine.parallel (%n) = (0) to (%N) {
-      affine.prefetch %src0[%n, %c0], read, locality<3>, data : memref<?x?xf32>
-      affine.prefetch %src1[%c0, %c0], read, locality<3>, data : memref<1x?xf32>
-
+      
       %vacc = scf.for %k0 = %c0 to %K step %c32
           iter_args(%acc = %vzero) -> (vector<32xf32>) {
         %w = vector.load %src0[%n, %k0] : memref<?x?xf32>, vector<32xf32>
@@ -55,7 +53,7 @@ module {
 
   func.func @main() {
     %c1536 = arith.constant 1536 : index
-    %c4480 = arith.constant 4480 : index
+    %c4480 = arith.constant 768 : index
 
     %f0 = arith.constant 0.000000e+00 : f32
     %f2 = arith.constant 2.000000e+00 : f32
