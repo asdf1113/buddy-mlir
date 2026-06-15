@@ -193,12 +193,14 @@ if args.precision == "f16":
 
     params = dynamo_compiler_prefill.imported_params[graph_prefill]
     # Enable verbose mode for debugging eliminate_matmul_transpose_reshape
-    graphs_prefill[0].perform(
-        [eliminate_transpose, eliminate_matmul_transpose_reshape]
-    )
-    graphs_decode[0].perform(
-        [eliminate_transpose, eliminate_matmul_transpose_reshape]
-    )
+    # graphs_prefill[0].perform(
+    #     [eliminate_transpose, eliminate_matmul_transpose_reshape]
+    # )
+    # graphs_decode[0].perform(
+    #     [eliminate_transpose, eliminate_matmul_transpose_reshape]
+    # )
+    graphs_prefill[0].perform([eliminate_matmul_transpose_reshape])
+    graphs_decode[0].perform([eliminate_matmul_transpose_reshape])
     pattern_list_prefill = [
         simply_fuse,
         apply_classic_fusion,
@@ -242,6 +244,12 @@ else:
     graphs_decode[0].perform(
         [eliminate_transpose, eliminate_matmul_transpose_reshape]
     )
+    # graphs_prefill[0].perform(
+    #     [eliminate_matmul_transpose_reshape]
+    # )
+    # graphs_decode[0].perform(
+    #     [eliminate_matmul_transpose_reshape]
+    # )
     pattern_list_prefill = [
         simply_fuse,
         apply_classic_fusion,
@@ -331,10 +339,10 @@ else:
         os.path.join(output_dir, "forward_prefill.mlir"), "w"
     ) as module_file:
         print(driver_prefill.construct_main_graph(True), file=module_file)
-    all_param = numpy.concatenate(
-        [param.detach().numpy().reshape([-1]) for param in params]
-    )
-    all_param.tofile(os.path.join(output_dir, "arg0.data"))
+    # all_param = numpy.concatenate(
+    #     [param.detach().numpy().reshape([-1]) for param in params]
+    # )
+    # all_param.tofile(os.path.join(output_dir, "arg0.data"))
 
     with open(
         os.path.join(output_dir, "subgraph0_decode.mlir"), "w"

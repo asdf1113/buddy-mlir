@@ -21,16 +21,16 @@ else()
   set(LLC_RISCV_ATTRS "-mcpu=native")
 endif()
 
-add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill.mlir
-          ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill.mlir
-          ${CMAKE_CURRENT_BINARY_DIR}/forward_decode.mlir
-          ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode.mlir
-          ${CMAKE_CURRENT_BINARY_DIR}/arg0.data
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/import-deepseek-r1.py
-          --output-dir ${CMAKE_CURRENT_BINARY_DIR}
-  COMMENT "Generating forward.mlir, subgraph0.mlir and arg0.data..."
-)
+# add_custom_command(
+#   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill.mlir
+#           ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill.mlir
+#           ${CMAKE_CURRENT_BINARY_DIR}/forward_decode.mlir
+#           ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode.mlir
+#           ${CMAKE_CURRENT_BINARY_DIR}/arg0.data
+#   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/import-deepseek-r1.py
+#           --output-dir ${CMAKE_CURRENT_BINARY_DIR}
+#   COMMENT "Generating forward.mlir, subgraph0.mlir and arg0.data..."
+# )
 
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill-f16.mlir
@@ -106,7 +106,7 @@ add_custom_command(
 
 add_custom_command(
   OUTPUT forward_prefill.o
-  COMMAND ${BUDDY_BINARY_DIR}/buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill.mlir
+  COMMAND ${BUDDY_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260606/forward_prefill.mlir
             -simplify-tosa-reshape |
           ${LLVM_TOOLS_BINARY_DIR}/mlir-opt
             -pass-pipeline ${TOSA_PIPELINE} |
@@ -150,13 +150,13 @@ add_custom_command(
         ${LLVM_TOOLS_BINARY_DIR}/llvm-as |
         ${LLVM_TOOLS_BINARY_DIR}/llc ${LLC_RISCV_ATTRS} -filetype=obj -relocation-model=pic -O3
           -o ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill.o
-  DEPENDS buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/forward_prefill.mlir
+  DEPENDS buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260606/forward_prefill.mlir
   COMMENT "Building forward_prefill.o "
   VERBATIM)
 
 add_custom_command(
     OUTPUT subgraph_prefill.o
-    COMMAND ${BUDDY_BINARY_DIR}/buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill.mlir
+    COMMAND ${BUDDY_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260606/subgraph0_prefill.mlir
               -simplify-tosa-reshape |
             ${LLVM_TOOLS_BINARY_DIR}/mlir-opt
               -pass-pipeline ${TOSA_PIPELINE} |
@@ -203,13 +203,13 @@ add_custom_command(
           ${LLVM_TOOLS_BINARY_DIR}/llvm-as |
           ${LLVM_TOOLS_BINARY_DIR}/llc ${LLC_RISCV_ATTRS} -filetype=obj -relocation-model=pic -O3
             -o ${CMAKE_CURRENT_BINARY_DIR}/subgraph_prefill.o
-    DEPENDS buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_prefill.mlir
+    DEPENDS buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260606/subgraph0_prefill.mlir
     COMMENT "Building subgraph_prefill.o "
     VERBATIM)
 
 add_custom_command(
   OUTPUT forward_decode.o
-  COMMAND ${BUDDY_BINARY_DIR}/buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/forward_decode.mlir
+  COMMAND ${BUDDY_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260606/forward_decode.mlir
             -simplify-tosa-reshape |
           ${LLVM_TOOLS_BINARY_DIR}/mlir-opt
             -pass-pipeline ${TOSA_PIPELINE} |
@@ -253,13 +253,13 @@ add_custom_command(
         ${LLVM_TOOLS_BINARY_DIR}/llvm-as |
         ${LLVM_TOOLS_BINARY_DIR}/llc ${LLC_RISCV_ATTRS} -filetype=obj -relocation-model=pic -O3
           -o ${CMAKE_CURRENT_BINARY_DIR}/forward_decode.o
-  DEPENDS buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/forward_decode.mlir
+  DEPENDS buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260606/forward_decode.mlir
   COMMENT "Building forward_decode.o "
   VERBATIM)
 
 add_custom_command(
     OUTPUT subgraph_decode.o
-    COMMAND ${BUDDY_BINARY_DIR}/buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode.mlir
+    COMMAND ${BUDDY_BINARY_DIR}/buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260606/subgraph0_decode.mlir
               -simplify-tosa-reshape
               -simplify-tosa-matmul-scalar |
             ${LLVM_TOOLS_BINARY_DIR}/mlir-opt
@@ -306,7 +306,7 @@ add_custom_command(
           ${LLVM_TOOLS_BINARY_DIR}/llvm-as |
           ${LLVM_TOOLS_BINARY_DIR}/llc ${LLC_RISCV_ATTRS} -filetype=obj -relocation-model=pic -O3
             -o ${CMAKE_CURRENT_BINARY_DIR}/subgraph_decode.o
-    DEPENDS buddy-opt ${CMAKE_CURRENT_BINARY_DIR}/subgraph0_decode.mlir
+    DEPENDS buddy-opt /home/lishiyang/split/buddy-mlir/examples/BuddyTensorParallel/temp20260606/subgraph0_decode.mlir
     COMMENT "Building subgraph_decode.o "
     VERBATIM)
 

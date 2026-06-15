@@ -1,13 +1,25 @@
-# Locate flatbuffers headers from system package (libflatbuffers-dev).
+# Locate flatbuffers headers.
+# It may come from system package libflatbuffers-dev,
+# or from a conda environment.
 find_path(FLATBUFFERS_INCLUDE_DIR flatbuffers/flatbuffers.h
-  HINTS /usr/include /usr/local/include
-  DOC "FlatBuffers include directory (from libflatbuffers-dev)"
+  HINTS
+    $ENV{CONDA_PREFIX}/include
+    ${CONDA_PREFIX}/include
+    /usr/include
+    /usr/local/include
+  DOC "FlatBuffers include directory"
 )
+
 if(NOT FLATBUFFERS_INCLUDE_DIR)
   message(FATAL_ERROR
-    "FlatBuffers headers not found. Install:\n"
-    "  sudo apt install libflatbuffers-dev")
+    "FlatBuffers headers not found. Install via system package:\n"
+    "  sudo apt install libflatbuffers-dev\n"
+    "or via conda:\n"
+    "  conda install -c conda-forge flatbuffers\n"
+    "or pass manually:\n"
+    "  -DFLATBUFFERS_INCLUDE_DIR=/path/to/conda/env/include")
 endif()
+
 message(STATUS "Found FlatBuffers headers: ${FLATBUFFERS_INCLUDE_DIR}")
 
 # flatc emits rax_generated.h; CMake renames to RAX.h for #include "buddy/runtime/rax/RAX.h"

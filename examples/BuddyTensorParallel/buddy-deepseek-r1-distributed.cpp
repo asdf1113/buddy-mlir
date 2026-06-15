@@ -23,6 +23,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -121,6 +122,218 @@ struct MaxLocPair {
   float value = -std::numeric_limits<float>::infinity();
   int index = -1;
 };
+
+inline void addFloatVectorInPlace(float *dst, const float *src, int count);
+
+inline double elapsedMs(HighResClock::time_point start) {
+  return std::chrono::duration<double, std::milli>(HighResClock::now() - start)
+      .count();
+}
+
+struct PerfStats {
+  size_t prefill_tokens = 0;
+  size_t decode_tokens = 0;
+
+  double prefill_total_ms = 0.0;
+  double prefill_compute_ms = 0.0;
+  double prefill_comm_ms = 0.0;
+  double prefill_memcpy_ms = 0.0;
+
+  // decode_total_ms is the active per-token critical path measured inside the
+  // decode loop. It intentionally excludes the rank-to-rank start/stop control
+  // wait before a token starts.
+  double decode_total_ms = 0.0;
+  double decode_compute_ms = 0.0;
+  double decode_comm_ms = 0.0;
+  double decode_memcpy_ms = 0.0;
+  double decode_runtime_overhead_ms = 0.0;
+
+  // Control/synchronization time is reported separately because on rank 1 the
+  // blocking ctrl recv mostly means "waiting for rank 0 to start the next
+  // token", not useful payload communication.
+  double decode_control_ms = 0.0;   // tiny start/stop ctrl send/recv cost.
+  double decode_sync_idle_ms = 0.0; // rank-side idle/synchronization wait.
+
+  // Decode compute breakdown. These are wall-clock durations of MLIR wrapper
+  // calls and tiny local CPU post-processing routines.
+  double decode_compute_frontend_ms = 0.0; // decode0 on rank 0.
+  double decode_compute_rms1_ms = 0.0;
+  double decode_compute_mha_ms = 0.0;
+  double decode_compute_residual1_ms = 0.0;
+  double decode_compute_rms2_ms = 0.0;
+  double decode_compute_mlp_ms = 0.0;
+  double decode_compute_residual2_ms = 0.0;
+  double decode_compute_lm_head_ms = 0.0;
+  double decode_compute_argmax_ms = 0.0;
+  double decode_compute_local_add_ms = 0.0;
+
+  // Decode effective communication breakdown. This excludes decode_control_ms
+  // and decode_sync_idle_ms to avoid double counting idle time outside
+  // decode_total_ms.
+  double decode_comm_post_ms = 0.0; // Isend/Irecv posting overhead.
+  double decode_comm_input_wait_ms =
+      0.0; // peer waiting for hidden/mask/cos/sin/pos.
+  double decode_comm_send_wait_ms = 0.0;  // rank 0 Waitall for input sends.
+  double decode_comm_mha_reduce_ms = 0.0; // tensor-parallel MHA all-reduce/sum.
+  double decode_comm_mlp_reduce_ms = 0.0; // tensor-parallel MLP all-reduce/sum.
+  double decode_comm_vocab_allreduce_ms = 0.0;
+
+  // Call counters help compute per-call averages.
+  size_t decode_mha_reduce_calls = 0;
+  size_t decode_mlp_reduce_calls = 0;
+  size_t decode_vocab_reduce_calls = 0;
+
+  void finalize() {
+    decode_compute_ms = decode_compute_frontend_ms + decode_compute_rms1_ms +
+                        decode_compute_mha_ms + decode_compute_residual1_ms +
+                        decode_compute_rms2_ms + decode_compute_mlp_ms +
+                        decode_compute_residual2_ms +
+                        decode_compute_lm_head_ms + decode_compute_argmax_ms +
+                        decode_compute_local_add_ms;
+    decode_comm_ms = decode_comm_post_ms + decode_comm_input_wait_ms +
+                     decode_comm_send_wait_ms + decode_comm_mha_reduce_ms +
+                     decode_comm_mlp_reduce_ms + decode_comm_vocab_allreduce_ms;
+
+    // This is the active-token residual only. It should normally be close to
+    // zero or mildly positive. A negative value means some measured component
+    // overlaps with another component or was counted outside active total.
+    decode_runtime_overhead_ms =
+        decode_total_ms - decode_compute_ms - decode_comm_ms - decode_memcpy_ms;
+  }
+};
+
+inline double percentOf(double value, double total) {
+  return total > 0.0 ? 100.0 * value / total : 0.0;
+}
+
+inline void printPerfStats(const PerfStats &pIn, int rank) {
+  PerfStats p = pIn;
+  p.finalize();
+
+  const double dtok =
+      p.decode_tokens ? static_cast<double>(p.decode_tokens) : 1.0;
+  const double activeTotal = p.decode_total_ms;
+  const double wallTotal =
+      p.decode_total_ms + p.decode_control_ms + p.decode_sync_idle_ms;
+
+  std::cout << std::fixed << std::setprecision(3);
+  std::cout << "\n\033[36;1m[Perf][Rank " << rank
+            << "] Decode summary\033[0m\n";
+  std::cout << "  tokens                 : " << p.decode_tokens << "\n";
+  std::cout << "  active total           : " << p.decode_total_ms << " ms, "
+            << p.decode_total_ms / dtok << " ms/token\n";
+  std::cout << "  wall total(+ctrl/idle) : " << wallTotal << " ms, "
+            << wallTotal / dtok << " ms/token\n";
+  std::cout << "  compute measured       : " << p.decode_compute_ms << " ms, "
+            << percentOf(p.decode_compute_ms, activeTotal) << "% of active\n";
+  std::cout << "  effective comm measured: " << p.decode_comm_ms << " ms, "
+            << percentOf(p.decode_comm_ms, activeTotal) << "% of active\n";
+  std::cout << "  memcpy                 : " << p.decode_memcpy_ms << " ms, "
+            << percentOf(p.decode_memcpy_ms, activeTotal) << "% of active\n";
+  std::cout << "  other active overhead  : " << p.decode_runtime_overhead_ms
+            << " ms, " << percentOf(p.decode_runtime_overhead_ms, activeTotal)
+            << "% of active\n";
+  std::cout << "  ctrl overhead          : " << p.decode_control_ms << " ms, "
+            << p.decode_control_ms / dtok << " ms/token\n";
+  std::cout << "  sync/idle wait         : " << p.decode_sync_idle_ms << " ms, "
+            << p.decode_sync_idle_ms / dtok << " ms/token\n";
+
+  std::cout << "\n  [compute breakdown]\n";
+  std::cout << "    frontend decode0     : " << p.decode_compute_frontend_ms
+            << " ms, " << p.decode_compute_frontend_ms / dtok << " ms/token\n";
+  std::cout << "    rms1                 : " << p.decode_compute_rms1_ms
+            << " ms, " << p.decode_compute_rms1_ms / dtok << " ms/token\n";
+  std::cout << "    mha                  : " << p.decode_compute_mha_ms
+            << " ms, " << p.decode_compute_mha_ms / dtok << " ms/token\n";
+  std::cout << "    residual1            : " << p.decode_compute_residual1_ms
+            << " ms, " << p.decode_compute_residual1_ms / dtok << " ms/token\n";
+  std::cout << "    rms2                 : " << p.decode_compute_rms2_ms
+            << " ms, " << p.decode_compute_rms2_ms / dtok << " ms/token\n";
+  std::cout << "    mlp                  : " << p.decode_compute_mlp_ms
+            << " ms, " << p.decode_compute_mlp_ms / dtok << " ms/token\n";
+  std::cout << "    residual2            : " << p.decode_compute_residual2_ms
+            << " ms, " << p.decode_compute_residual2_ms / dtok << " ms/token\n";
+  std::cout << "    lm_head              : " << p.decode_compute_lm_head_ms
+            << " ms, " << p.decode_compute_lm_head_ms / dtok << " ms/token\n";
+  std::cout << "    argmax               : " << p.decode_compute_argmax_ms
+            << " ms, " << p.decode_compute_argmax_ms / dtok << " ms/token\n";
+  std::cout << "    local add after sum  : " << p.decode_compute_local_add_ms
+            << " ms, " << p.decode_compute_local_add_ms / dtok << " ms/token\n";
+
+  std::cout << "\n  [effective communication breakdown]\n";
+  std::cout << "    Isend/Irecv post     : " << p.decode_comm_post_ms << " ms, "
+            << p.decode_comm_post_ms / dtok << " ms/token\n";
+  std::cout << "    peer input wait      : " << p.decode_comm_input_wait_ms
+            << " ms, " << p.decode_comm_input_wait_ms / dtok << " ms/token\n";
+  std::cout << "    rank0 send wait      : " << p.decode_comm_send_wait_ms
+            << " ms, " << p.decode_comm_send_wait_ms / dtok << " ms/token\n";
+  std::cout << "    MHA reduce           : " << p.decode_comm_mha_reduce_ms
+            << " ms, calls=" << p.decode_mha_reduce_calls << ", avg="
+            << (p.decode_mha_reduce_calls
+                    ? p.decode_comm_mha_reduce_ms / p.decode_mha_reduce_calls
+                    : 0.0)
+            << " ms/call\n";
+  std::cout << "    MLP reduce           : " << p.decode_comm_mlp_reduce_ms
+            << " ms, calls=" << p.decode_mlp_reduce_calls << ", avg="
+            << (p.decode_mlp_reduce_calls
+                    ? p.decode_comm_mlp_reduce_ms / p.decode_mlp_reduce_calls
+                    : 0.0)
+            << " ms/call\n";
+  std::cout << "    vocab allreduce      : " << p.decode_comm_vocab_allreduce_ms
+            << " ms, calls=" << p.decode_vocab_reduce_calls << ", avg="
+            << (p.decode_vocab_reduce_calls ? p.decode_comm_vocab_allreduce_ms /
+                                                  p.decode_vocab_reduce_calls
+                                            : 0.0)
+            << " ms/call\n";
+
+  if (p.decode_runtime_overhead_ms < -1.0) {
+    std::cout
+        << "\n  [note] other active overhead is negative. This means at least "
+           "one\n"
+        << "         measured communication wait overlaps with compute or was\n"
+        << "         timed outside active total. Use wall total and per-item\n"
+        << "         breakdown to diagnose overlap, not only the "
+           "percentages.\n";
+  }
+  std::cout.flush();
+}
+
+inline void reduceSumTwoRanksSendrecvTimed(const float *localBuf, float *sumBuf,
+                                           int count, int peerRankInComm,
+                                           int tag, MPI_Comm comm,
+                                           double &commMs, double &localAddMs) {
+  if (comm == MPI_COMM_NULL) {
+    auto t = HighResClock::now();
+    std::memcpy(sumBuf, localBuf, sizeof(float) * count);
+    localAddMs += elapsedMs(t);
+    return;
+  }
+  auto tComm = HighResClock::now();
+  MPI_Sendrecv(localBuf, count, MPI_FLOAT, peerRankInComm, tag, sumBuf, count,
+               MPI_FLOAT, peerRankInComm, tag, comm, MPI_STATUS_IGNORE);
+  commMs += elapsedMs(tComm);
+
+  auto tAdd = HighResClock::now();
+  addFloatVectorInPlace(sumBuf, localBuf, count);
+  localAddMs += elapsedMs(tAdd);
+}
+
+inline MaxLocPair reduceMaxLocTimed(float localValue, int globalIndex,
+                                    MPI_Comm comm, double &commMs) {
+  if (comm == MPI_COMM_NULL) {
+    return MaxLocPair{localValue, globalIndex};
+  }
+
+  struct {
+    float value;
+    int index;
+  } local{localValue, globalIndex}, global{0.0f, -1};
+
+  auto tComm = HighResClock::now();
+  MPI_Allreduce(&local, &global, 1, MPI_FLOAT_INT, MPI_MAXLOC, comm);
+  commMs += elapsedMs(tComm);
+  return MaxLocPair{global.value, global.index};
+}
 
 /// Capture input message.
 void getUserInput(std::string &inputStr) {
@@ -254,6 +467,7 @@ int main(int argc, char *argv[]) {
   }
 
   if (rank == FrontendRank) {
+    PerfStats perf;
     const std::string title = "DeepSeekR1  Inference Powered by Buddy Compiler";
     std::cout << "\033[33;1m" << title << "\033[0m" << std::endl;
 
@@ -520,14 +734,19 @@ int main(int argc, char *argv[]) {
 
     for (int i = 1; i <= generateLen; i++) {
       ctrl = 0;
+      auto tCtrl = HighResClock::now();
       MPI_Send(&ctrl, 1, MPI_INT, PeerRank, 99, MPI_COMM_WORLD);
+      perf.decode_control_ms += elapsedMs(tCtrl);
 
       const auto decodeStart = HighResClock::now();
 
+      auto tComp = HighResClock::now();
       _mlir_ciface_forward_decode0(resultContainerDecodePtr, &paramsContainer0,
                                    &inputContainerDecode, &cachePosition);
+      perf.decode_compute_frontend_ms += elapsedMs(tComp);
       inputPtr = resultContainerDecodePtr->data.getData();
 
+      auto tPost = HighResClock::now();
       MPI_Isend(inputPtr, HiddenSize0, MPI_FLOAT, PeerRank, 0, MPI_COMM_WORLD,
                 &send_req_decode[0]);
       MPI_Isend(resultContainerDecodePtr->mask.getData(), MaxTokenLength,
@@ -538,78 +757,111 @@ int main(int argc, char *argv[]) {
                 PeerRank, 3, MPI_COMM_WORLD, &send_req_decode[3]);
       MPI_Isend(cachePosition.getData(), 1, MPI_LONG_LONG, PeerRank, 4,
                 MPI_COMM_WORLD, &send_req_decode[4]);
+      perf.decode_comm_post_ms += elapsedMs(tPost);
 
+      auto tMemcpy = HighResClock::now();
       std::memcpy(subResultContainerDecode.getData(), inputPtr,
                   sizeof(float) * HiddenSize0);
+      perf.decode_memcpy_ms += elapsedMs(tMemcpy);
 
       for (int m = 0; m < times; m++) {
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode1(&sub3DContainerDecode,
                                      &paramsContainersRMS[m],
                                      &subResultContainerDecode);
+        perf.decode_compute_rms1_ms += elapsedMs(tComp);
 
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode2(
             kvDecodeContainerPtr0, &paramsContainersMHA[m], &cachePosition,
             &kv0[2 * m], &kv0[2 * m + 1], &resultContainerDecodePtr->mask,
             &resultContainerDecodePtr->cos, &resultContainerDecodePtr->sin,
             &sub3DContainerDecode);
+        perf.decode_compute_mha_ms += elapsedMs(tComp);
         kv0[2 * m] = kvDecodeContainerPtr0->kcache;
         kv0[2 * m + 1] = kvDecodeContainerPtr0->vcache;
         tmp2DContainerDecode = kvDecodeContainerPtr0->data;
         mhaOutputPtrDecode = tmp2DContainerDecode.getData();
 
         if (comm_sub != MPI_COMM_NULL) {
-          reduceSumTwoRanksSendrecv(mhaOutputPtrDecode,
-                                    sub2DContainerDecode.getData(), HiddenSize0,
-                                    PeerRank, 1000 + m, comm_sub);
+          reduceSumTwoRanksSendrecvTimed(
+              mhaOutputPtrDecode, sub2DContainerDecode.getData(), HiddenSize0,
+              PeerRank, 1000 + m, comm_sub, perf.decode_comm_mha_reduce_ms,
+              perf.decode_compute_local_add_ms);
+          perf.decode_mha_reduce_calls++;
         } else {
+          tMemcpy = HighResClock::now();
           std::memcpy(sub2DContainerDecode.getData(), mhaOutputPtrDecode,
                       sizeof(float) * HiddenSize0);
+          perf.decode_memcpy_ms += elapsedMs(tMemcpy);
         }
 
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode3(&subResultContainerDecode,
                                      &subResultContainerDecode,
                                      &sub2DContainerDecode);
+        perf.decode_compute_residual1_ms += elapsedMs(tComp);
 
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode1(&sub3DContainerDecode,
                                      &paramsContainersRMS0[m],
                                      &subResultContainerDecode);
+        perf.decode_compute_rms2_ms += elapsedMs(tComp);
 
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode5(&tmp2DContainerDecode,
                                      &paramsContainersMLP[m],
                                      &sub3DContainerDecode);
+        perf.decode_compute_mlp_ms += elapsedMs(tComp);
         mhaOutputPtrDecode = tmp2DContainerDecode.getData();
 
         if (comm_sub != MPI_COMM_NULL) {
-          reduceSumTwoRanksSendrecv(mhaOutputPtrDecode,
-                                    sub2DContainerDecode.getData(), HiddenSize0,
-                                    PeerRank, 2000 + m, comm_sub);
+          reduceSumTwoRanksSendrecvTimed(
+              mhaOutputPtrDecode, sub2DContainerDecode.getData(), HiddenSize0,
+              PeerRank, 2000 + m, comm_sub, perf.decode_comm_mlp_reduce_ms,
+              perf.decode_compute_local_add_ms);
+          perf.decode_mlp_reduce_calls++;
         } else {
+          tMemcpy = HighResClock::now();
           std::memcpy(sub2DContainerDecode.getData(), mhaOutputPtrDecode,
                       sizeof(float) * HiddenSize0);
+          perf.decode_memcpy_ms += elapsedMs(tMemcpy);
         }
 
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode3(&subResultContainerDecode,
                                      &subResultContainerDecode,
                                      &sub2DContainerDecode);
+        perf.decode_compute_residual2_ms += elapsedMs(tComp);
       }
 
+      auto tWait = HighResClock::now();
       MPI_Waitall(5, send_req_decode, MPI_STATUSES_IGNORE);
+      perf.decode_comm_send_wait_ms += elapsedMs(tWait);
 
+      tMemcpy = HighResClock::now();
       std::memcpy(myMemRef_decode1.getData(),
                   subResultContainerDecode.getData(),
                   sizeof(float) * HiddenSize0);
+      perf.decode_memcpy_ms += elapsedMs(tMemcpy);
 
+      tComp = HighResClock::now();
       _mlir_ciface_forward_decode169(&resultDecodeShard0, &paramsContainer2,
                                      &myMemRef_decode1);
+      perf.decode_compute_lm_head_ms += elapsedMs(tComp);
 
       const float *decodeShard0StartPtr = resultDecodeShard0.getData();
       const float *decodeShard0EndPtr = decodeShard0StartPtr + VocabShardSize;
+      tComp = HighResClock::now();
       int localDecodeMaxIndex =
           findMaxIndex(decodeShard0StartPtr, decodeShard0EndPtr);
       float localDecodeMaxValue = decodeShard0StartPtr[localDecodeMaxIndex];
+      perf.decode_compute_argmax_ms += elapsedMs(tComp);
 
       MaxLocPair globalTop1 =
-          reduceMaxLoc(localDecodeMaxValue, localDecodeMaxIndex, comm_sub);
+          reduceMaxLocTimed(localDecodeMaxValue, localDecodeMaxIndex, comm_sub,
+                            perf.decode_comm_vocab_allreduce_ms);
+      perf.decode_vocab_reduce_calls++;
       maxIndex = globalTop1.index;
 
       const auto decodeEnd = HighResClock::now();
@@ -617,13 +869,17 @@ int main(int argc, char *argv[]) {
           decodeEnd - decodeStart;
       decodeTimeAccumMs += decodeTime.count();
       decodeTokens += 1;
+      perf.decode_total_ms += decodeTime.count();
+      perf.decode_tokens += 1;
 
       tok = inputContainerPrefill.getStr(maxIndex);
       printIterInfo(i, tok, decodeTime.count() / 1000.0);
 
       if (maxIndex == 151643) {
         ctrl = 1;
+        tCtrl = HighResClock::now();
         MPI_Send(&ctrl, 1, MPI_INT, PeerRank, 99, MPI_COMM_WORLD);
+        perf.decode_control_ms += elapsedMs(tCtrl);
         sentStop = true;
         break;
       }
@@ -635,13 +891,18 @@ int main(int argc, char *argv[]) {
 
     if (!sentStop) {
       ctrl = 1;
+      auto tCtrl = HighResClock::now();
       MPI_Send(&ctrl, 1, MPI_INT, PeerRank, 99, MPI_COMM_WORLD);
+      perf.decode_control_ms += elapsedMs(tCtrl);
     }
 
     double decodeSeconds = decodeTimeAccumMs / 1000.0;
     const double decodeTokensPerSec =
         decodeSeconds > 0.0 ? static_cast<double>(decodeTokens) / decodeSeconds
                             : 0.0;
+
+    printPerfStats(perf, rank);
+    std::cout.flush();
 
     std::cout << "\n\033[33;1m[Total time]\033[0m " << total_time << std::endl;
     std::cout << "\033[33;1m[Prefilling]\033[0m " << prefillTokensPerSec
@@ -663,6 +924,7 @@ int main(int argc, char *argv[]) {
     }
 
   } else if (rank == PeerRank) {
+    PerfStats perf;
 
     std::vector<MemRef<float, 4>> kv0;
     kv0.reserve(NUM_LAYERS);
@@ -839,12 +1101,17 @@ int main(int argc, char *argv[]) {
     int ctrl = 0;
 
     for (int i = 1; i <= generateLen; i++) {
+      auto tCtrl = HighResClock::now();
       MPI_Recv(&ctrl, 1, MPI_INT, source, 99, MPI_COMM_WORLD,
                MPI_STATUS_IGNORE);
+      perf.decode_sync_idle_ms += elapsedMs(tCtrl);
       if (ctrl == 1) {
         break;
       }
 
+      const auto decodeStart = HighResClock::now();
+
+      auto tPost = HighResClock::now();
       MPI_Irecv(subResultContainerDecode.getData(), HiddenSize0, MPI_FLOAT,
                 source, 0, MPI_COMM_WORLD, &recv_req_decode[0]);
       MPI_Irecv(mhaMemRef4DPtrDecode, MaxTokenLength, MPI_INT8_T, source, 1,
@@ -855,76 +1122,112 @@ int main(int argc, char *argv[]) {
                 MPI_COMM_WORLD, &recv_req_decode[3]);
       MPI_Irecv(cachePosition.getData(), 1, MPI_LONG_LONG, source, 4,
                 MPI_COMM_WORLD, &recv_req_decode[4]);
+      perf.decode_comm_post_ms += elapsedMs(tPost);
 
+      auto tWait = HighResClock::now();
       MPI_Wait(&recv_req_decode[0], MPI_STATUS_IGNORE);
+      perf.decode_comm_input_wait_ms += elapsedMs(tWait);
 
       for (int m = 0; m < times; m++) {
+        auto tComp = HighResClock::now();
         _mlir_ciface_forward_decode1(&sub3DContainerDecode,
                                      &paramsContainersRMS[m],
                                      &subResultContainerDecode);
+        perf.decode_compute_rms1_ms += elapsedMs(tComp);
 
         if (m == 0) {
+          tWait = HighResClock::now();
           MPI_Waitall(4, &recv_req_decode[1], MPI_STATUSES_IGNORE);
+          perf.decode_comm_input_wait_ms += elapsedMs(tWait);
         }
 
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode2(
             kvDecodeContainerPtr0, &paramsContainersMHA[m], &cachePosition,
             &kv0[2 * m], &kv0[2 * m + 1], &mhaMemRef4DDecode,
             &mhaMemRef3D1Decode, &mhaMemRef3D2Decode, &sub3DContainerDecode);
+        perf.decode_compute_mha_ms += elapsedMs(tComp);
         kv0[2 * m] = kvDecodeContainerPtr0->kcache;
         kv0[2 * m + 1] = kvDecodeContainerPtr0->vcache;
         tmp2DContainerDecode = kvDecodeContainerPtr0->data;
         mhaOutputPtrDecode = tmp2DContainerDecode.getData();
 
         if (comm_sub != MPI_COMM_NULL) {
-          reduceSumTwoRanksSendrecv(mhaOutputPtrDecode,
-                                    sub2DContainerDecode.getData(), HiddenSize0,
-                                    FrontendRank, 1000 + m, comm_sub);
+          reduceSumTwoRanksSendrecvTimed(
+              mhaOutputPtrDecode, sub2DContainerDecode.getData(), HiddenSize0,
+              FrontendRank, 1000 + m, comm_sub, perf.decode_comm_mha_reduce_ms,
+              perf.decode_compute_local_add_ms);
+          perf.decode_mha_reduce_calls++;
         } else {
+          auto tMemcpy = HighResClock::now();
           std::memcpy(sub2DContainerDecode.getData(), mhaOutputPtrDecode,
                       sizeof(float) * HiddenSize0);
+          perf.decode_memcpy_ms += elapsedMs(tMemcpy);
         }
 
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode3(&subResultContainerDecode,
                                      &subResultContainerDecode,
                                      &sub2DContainerDecode);
+        perf.decode_compute_residual1_ms += elapsedMs(tComp);
 
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode1(&sub3DContainerDecode,
                                      &paramsContainersRMS0[m],
                                      &subResultContainerDecode);
+        perf.decode_compute_rms2_ms += elapsedMs(tComp);
 
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode5(&tmp2DContainerDecode,
                                      &paramsContainersMLP[m],
                                      &sub3DContainerDecode);
+        perf.decode_compute_mlp_ms += elapsedMs(tComp);
         mhaOutputPtrDecode = tmp2DContainerDecode.getData();
 
         if (comm_sub != MPI_COMM_NULL) {
-          reduceSumTwoRanksSendrecv(mhaOutputPtrDecode,
-                                    sub2DContainerDecode.getData(), HiddenSize0,
-                                    FrontendRank, 2000 + m, comm_sub);
+          reduceSumTwoRanksSendrecvTimed(
+              mhaOutputPtrDecode, sub2DContainerDecode.getData(), HiddenSize0,
+              FrontendRank, 2000 + m, comm_sub, perf.decode_comm_mlp_reduce_ms,
+              perf.decode_compute_local_add_ms);
+          perf.decode_mlp_reduce_calls++;
         } else {
+          auto tMemcpy = HighResClock::now();
           std::memcpy(sub2DContainerDecode.getData(), mhaOutputPtrDecode,
                       sizeof(float) * HiddenSize0);
+          perf.decode_memcpy_ms += elapsedMs(tMemcpy);
         }
 
+        tComp = HighResClock::now();
         _mlir_ciface_forward_decode3(&subResultContainerDecode,
                                      &subResultContainerDecode,
                                      &sub2DContainerDecode);
+        perf.decode_compute_residual2_ms += elapsedMs(tComp);
       }
 
+      auto tComp = HighResClock::now();
       _mlir_ciface_forward_decode169(&resultDecodeShard1, &paramsContainer2,
                                      &subResultContainerDecode);
+      perf.decode_compute_lm_head_ms += elapsedMs(tComp);
 
       const float *decodeShard1StartPtr = resultDecodeShard1.getData();
       const float *decodeShard1EndPtr = decodeShard1StartPtr + VocabShardSize;
+      tComp = HighResClock::now();
       int localDecodeMaxIndex =
           findMaxIndex(decodeShard1StartPtr, decodeShard1EndPtr);
       float localDecodeMaxValue = decodeShard1StartPtr[localDecodeMaxIndex];
+      perf.decode_compute_argmax_ms += elapsedMs(tComp);
 
-      (void)reduceMaxLoc(localDecodeMaxValue,
-                         static_cast<int>(VocabShardSize) + localDecodeMaxIndex,
-                         comm_sub);
+      (void)reduceMaxLocTimed(localDecodeMaxValue,
+                              static_cast<int>(VocabShardSize) +
+                                  localDecodeMaxIndex,
+                              comm_sub, perf.decode_comm_vocab_allreduce_ms);
+      perf.decode_vocab_reduce_calls++;
+
+      perf.decode_total_ms += elapsedMs(decodeStart);
+      perf.decode_tokens += 1;
     }
+
+    printPerfStats(perf, rank);
 
     if (comm_sub != MPI_COMM_NULL) {
       MPI_Comm_free(&comm_sub);
