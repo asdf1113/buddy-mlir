@@ -57,13 +57,17 @@ public:
                                             int64_t vfParam,
                                             int64_t unrollParam,
                                             int64_t nTileParam)
-      : ConversionPattern(linalg::MatmulTransposeBOp::getOperationName(), 1,
-                          context),
+      : ConversionPattern(linalg::MatmulOp::getOperationName(), 1, context),
         vf(vfParam), unroll(unrollParam), nTile(nTileParam) {}
 
   LogicalResult
   matchAndRewrite(Operation *op, ArrayRef<Value> /*operands*/,
                   ConversionPatternRewriter &rewriter) const override {
+    // Match only linalg.matmul operations whose indexing maps represent:
+    // A[m, k] * B[n, k] -> C[m, n].
+    if (!isa<linalg::MatmulTransposeBOp>(op))
+      return failure();
+
     Location loc = op->getLoc();
 
     Value A = op->getOperand(0); // [M, K]
@@ -464,9 +468,14 @@ void MatMulTransposeBVecDecodePass::runOnOperation() {
 
   target.addLegalOp<ModuleOp, func::FuncOp, func::ReturnOp, func::CallOp>();
 
-  // This pass supports MxK x NxK -> MxN f32 memref shapes and rewrites
-  // linalg.matmul_transpose_b into explicit vector/scf/memref operations.
-  target.addIllegalOp<linalg::MatmulTransposeBOp>();
+  // Only buffer-semantics linalg.matmul with transpose-B indexing maps is
+  // rewritten. Ordinary matmul and tensor-semantics matmul remain legal.
+  target.addDynamicallyLegalOp<linalg::MatmulOp>(
+      [](linalg::MatmulOp op) {
+        bool isTransposeB =
+            isa<linalg::MatmulTransposeBOp>(op.getOperation());
+        return !isTransposeB || !op.hasPureBufferSemantics();
+      });
 
   RewritePatternSet patterns(context);
   patterns.add<MatMulTransposeBVecDecodePattern>(
