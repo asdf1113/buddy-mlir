@@ -36,7 +36,16 @@ from .transformer_partition import (
 )
 from .transformer_partition import TemplateUnit as TemplateUnit
 from .transformer_partition import (
+    TransformerParallelConfig as TransformerParallelConfig,
+)
+from .transformer_partition import (
+    TransformerParallelPlan as TransformerParallelPlan,
+)
+from .transformer_partition import (
     TransformerPartitionPlan as TransformerPartitionPlan,
+)
+from .transformer_partition import (
+    build_transformer_parallel_plan as build_transformer_parallel_plan,
 )
 from .transformer_partition import (
     build_transformer_partition_plan as build_transformer_partition_plan,
