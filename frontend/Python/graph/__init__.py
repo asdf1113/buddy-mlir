@@ -23,6 +23,9 @@ from .graph import NodeType as NodeType
 from .graph_driver import GraphDriver as GraphDriver
 from .operation import *
 from .partitioned_graph_driver import (
+    ParallelTemplatePartitionedGraphDriver as ParallelTemplatePartitionedGraphDriver,
+)
+from .partitioned_graph_driver import (
     PartitionedGraphDriver as PartitionedGraphDriver,
 )
 from .partitioned_graph_driver import (

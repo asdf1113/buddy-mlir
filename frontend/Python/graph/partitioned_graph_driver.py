@@ -57,7 +57,9 @@ from .transformer_partition import (
     GraphValueRef,
     RegionInputKind,
     RegionInputRef,
+    RewriteTarget,
     TemplateInstanceBinding,
+    TransformerParallelPlan,
     TransformerPartitionPlan,
     _operand_dict_items,
     _resolve_operand_node_reference,
@@ -1816,3 +1818,208 @@ class TemplatePartitionedGraphDriver:
                 verbose_path=main_graph._verbose_path,
             )
             return importer.import_main_graph()
+
+
+class ParallelTemplatePartitionedGraphDriver(TemplatePartitionedGraphDriver):
+    """Materialize rank-local compute segments from a Stage 1 parallel plan."""
+
+    def __init__(
+        self,
+        graph: Graph,
+        partition_plan: TransformerPartitionPlan,
+        parallel_plan: TransformerParallelPlan,
+        rank: int,
+    ) -> None:
+        super().__init__(graph, partition_plan)
+        if rank < 0 or rank >= parallel_plan.world_size:
+            raise ValueError(
+                f"rank {rank} is outside [0, {parallel_plan.world_size})"
+            )
+        if parallel_plan.graph_name != graph._func_name:
+            raise ValueError("parallel plan graph_name does not match Graph")
+        expected_ids = tuple(
+            unit.template_id for unit in partition_plan.templates
+        )
+        actual_ids = tuple(unit.template_id for unit in parallel_plan.templates)
+        if actual_ids != expected_ids:
+            raise ValueError(
+                "parallel plan template id/order does not match partition plan"
+            )
+        self._parallel_plan = parallel_plan
+        self._rank = rank
+
+    @property
+    def subgraphs(self):
+        if not self._subgraphs:
+            return []
+        return [
+            self._subgraphs[(template.template_id, segment.segment_index)]
+            for template in self._parallel_plan.templates
+            for segment in template.segments
+        ]
+
+    def parallel_template_symbol(
+        self, template_id: int, segment_index: int
+    ) -> str:
+        return f"{self.template_symbol(template_id)}_seg{segment_index}"
+
+    def _collective_ingress_map(self, template) -> dict:
+        ingress = {}
+        for segment in template.segments:
+            nodes = set(segment.ordered_nodes)
+            uses_by_value = defaultdict(set)
+            for op in segment.ordered_nodes:
+                for value, path in iter_op_input_references(
+                    op, self._graph.node_table, with_paths=True
+                ):
+                    uses_by_value[value].add((op, path))
+            for value in segment.ordered_inputs:
+                uses = uses_by_value[value]
+                boundaries = []
+                for boundary in template.collectives:
+                    if boundary.producer != value:
+                        continue
+                    boundary_uses = {
+                        (use.consumer, use.operand_path)
+                        for use in boundary.consumers
+                        if use.consumer in nodes
+                    }
+                    if not boundary_uses:
+                        continue
+                    if boundary_uses != uses:
+                        raise ValueError(
+                            f"segment {segment.segment_index} input "
+                            f"{value.op.name!r}:{value.result_index} has ambiguous "
+                            "collective ingress"
+                        )
+                    boundaries.append(boundary)
+                if len(boundaries) > 1:
+                    raise ValueError(
+                        f"segment {segment.segment_index} input "
+                        f"{value.op.name!r}:{value.result_index} has ambiguous "
+                        "collective ingress"
+                    )
+                if boundaries:
+                    ingress[(segment.segment_index, value)] = boundaries[0]
+        return ingress
+
+    def _rank_tensor_meta(self, value: GraphValueRef, shape) -> TensorMeta:
+        meta = graph_value_tensor_meta(value)
+        return TensorMeta(tuple(shape), meta.dtype)
+
+    def _localize_result_metadata(self, op, clone, layouts) -> None:
+        meta = op.tensor_meta
+        shape = (
+            meta.shape if isinstance(meta, TensorMeta) else meta.get("shape")
+        )
+        if shape is None:
+            raise ValueError(f"operation {op.name!r} has no result metadata")
+        is_multi_result = (
+            isinstance(shape, (list, tuple))
+            and bool(shape)
+            and isinstance(shape[0], (list, tuple, torch.Size))
+        )
+        result_count = len(shape) if is_multi_result else 1
+        local_shapes = []
+        for result_index in range(result_count):
+            value = GraphValueRef(op, result_index)
+            try:
+                spec = layouts[value]
+            except KeyError as error:
+                raise ValueError(
+                    f"result {op.name!r}:{result_index} has no value layout"
+                ) from error
+            local_shapes.append(tuple(spec.local_shapes[self._rank]))
+        clone._tensor_meta["shape"] = (
+            local_shapes if is_multi_result else local_shapes[0]
+        )
+
+    def _apply_op_rewrite(self, clone, spec) -> None:
+        value = tuple(spec.rank_values[self._rank])
+        if spec.target is RewriteTarget.NEW_SHAPE:
+            if spec.operand_path is not None:
+                raise ValueError(
+                    "NEW_SHAPE rewrite must not have an operand path"
+                )
+            clone._newshape = value
+            return
+        if spec.target is RewriteTarget.OPERAND:
+            if spec.operand_path != ("args", 1):
+                raise ValueError(
+                    f"unsupported operand rewrite path {spec.operand_path!r}"
+                )
+            if len(clone._arguments) <= 1:
+                raise ValueError("operand rewrite path does not exist on clone")
+            clone._arguments[1] = value
+            return
+        raise ValueError(f"unsupported rewrite target {spec.target!r}")
+
+    def build_parallel_template_subgraphs(self):
+        if self._subgraphs:
+            return self.subgraphs
+        materialized = {}
+        for template in self._parallel_plan.templates:
+            layouts = {spec.value: spec for spec in template.value_layouts}
+            rewrites = defaultdict(list)
+            for spec in template.op_rewrites:
+                rewrites[spec.op].append(spec)
+            ingress = self._collective_ingress_map(template)
+            for segment in template.segments:
+                subgraph = Graph(
+                    self._graph._ops_registry,
+                    self.parallel_template_symbol(
+                        template.template_id, segment.segment_index
+                    ),
+                    self._graph.device,
+                    verbose=self._graph._verbose,
+                    verbose_path=self._graph._verbose_path,
+                )
+                local_nodes = set(segment.ordered_nodes)
+                bindings = {}
+                for slot, value in enumerate(segment.ordered_inputs):
+                    try:
+                        layout = layouts[value]
+                    except KeyError as error:
+                        raise ValueError(
+                            f"segment input {value.op.name!r}:"
+                            f"{value.result_index} has no value layout"
+                        ) from error
+                    boundary = ingress.get((segment.segment_index, value))
+                    shape = (
+                        boundary.target_local_shapes[self._rank]
+                        if boundary is not None
+                        else layout.local_shapes[self._rank]
+                    )
+                    placeholder = PlaceholderOp()
+                    placeholder.name = f"__segment_arg{slot}"
+                    placeholder.tensor_meta = self._rank_tensor_meta(
+                        value, shape
+                    )
+                    subgraph.add_node(placeholder, NodeType.InputNode)
+                    bindings[value] = placeholder.name
+
+                for op in segment.ordered_nodes:
+                    clone = self._clone_region_node(op, bindings, local_nodes)
+                    self._localize_result_metadata(op, clone, layouts)
+                    for spec in rewrites.get(op, ()):
+                        self._apply_op_rewrite(clone, spec)
+                    subgraph.add_node(clone)
+
+                output = OutputOp()
+                output.name = "output"
+                for slot, value in enumerate(segment.ordered_outputs):
+                    if value.result_index == 0:
+                        output.add_argument(value.op.name)
+                        continue
+                    getitem = GetItemOp()
+                    getitem.name = f"__segment_result{slot}"
+                    getitem.add_argument(value.op.name)
+                    getitem.add_argument(value.result_index)
+                    subgraph.add_node(getitem)
+                    output.add_argument(getitem.name)
+                subgraph.add_node(output)
+                materialized[(template.template_id, segment.segment_index)] = (
+                    subgraph
+                )
+        self._subgraphs = materialized
+        return self.subgraphs
