@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 
 import numpy as np
 import torch
@@ -64,6 +65,15 @@ PROCESSOR_EXCLUDE_SUFFIXES = (
     ".safetensors",
     ".tflite",
 )
+
+
+def _perf(name, started, **counts):
+    if os.environ.get("BUDDY_TEMPLATE_PERF") == "1":
+        fields = " ".join(f"{key}={value}" for key, value in counts.items())
+        print(
+            f"[template-perf] phase={name} seconds={time.monotonic() - started:.6f} {fields}".rstrip(),
+            file=sys.stderr,
+        )
 
 
 def rmsnorm(x, w, eps=1e-6):
@@ -387,12 +397,16 @@ def import_graph(
         aot_autograd_decomposition=inductor_decomp,
         func_name="forward",
     )
+    started = time.monotonic()
     with torch.no_grad():
         graphs = dynamo.importer(module, *example_inputs)
+    _perf(f"{prefix}.graph_capture_import", started, graphs=len(graphs))
     print(f"[import] graphs={len(graphs)}")
     graph = graphs[0]
     params = dynamo.imported_params[graph]
+    started = time.monotonic()
     graph.fuse_ops([simply_fuse])
+    _perf(f"{prefix}.graph_transforms", started)
 
     if template_partitioned:
         mlir_dir = os.path.join(out_dir, "layer_partitioned")
@@ -404,9 +418,22 @@ def import_graph(
             ) and filename.endswith(".mlir"):
                 os.remove(os.path.join(mlir_dir, filename))
 
+        started = time.monotonic()
         plan = build_transformer_partition_plan(graph)
+        _perf(
+            f"{prefix}.template_analysis",
+            started,
+            instances=len(plan.partition_sequence),
+            templates=len(plan.templates),
+        )
         driver = TemplatePartitionedGraphDriver(graph, plan)
+        started = time.monotonic()
         subgraphs = driver.build_template_subgraphs()
+        _perf(
+            f"{prefix}.template_materialization",
+            started,
+            materialized_bodies=len(subgraphs),
+        )
 
         if len(subgraphs) != len(plan.templates):
             raise ValueError(
@@ -416,6 +443,7 @@ def import_graph(
 
         template_files = []
 
+        started = time.monotonic()
         for unit, subgraph in zip(
             plan.templates,
             subgraphs,
@@ -434,6 +462,7 @@ def import_graph(
                 print(subgraph._imported_module, file=module_file)
 
             template_files.append(filename)
+        _perf(f"{prefix}.mlir_lowering_emission", started)
 
         forward_file = f"{prefix}_forward.mlir"
 
@@ -451,6 +480,9 @@ def import_graph(
             "template_materialization": True,
             "forward": forward_file,
             "template_files": template_files,
+            "layer_instances": len(plan.partition_sequence),
+            "template_classes": len(plan.templates),
+            "materialized_bodies": len(subgraphs),
         }
 
         with open(
@@ -462,6 +494,7 @@ def import_graph(
 
     else:
         driver = GraphDriver(graph)
+        started = time.monotonic()
         driver.subgraphs[0].lower_to_top_level_ir()
 
         with open(
@@ -472,6 +505,9 @@ def import_graph(
             "w",
         ) as module_file:
             print(driver.subgraphs[0]._imported_module, file=module_file)
+        _perf(
+            f"{prefix}.mlir_lowering_emission", started, materialized_bodies=1
+        )
 
         with open(
             os.path.join(

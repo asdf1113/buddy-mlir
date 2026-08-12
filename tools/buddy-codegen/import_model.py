@@ -113,6 +113,16 @@ def timed_import_step(name: str):
         print(f"[import][time] {name}: {elapsed:.2f}s", file=sys.stderr)
 
 
+def template_perf(name: str, started: float, **counts):
+    if os.environ.get("BUDDY_TEMPLATE_PERF") == "1":
+        fields = " ".join(f"{key}={value}" for key, value in counts.items())
+        print(
+            f"[template-perf] phase={name} "
+            f"seconds={time.perf_counter() - started:.6f} {fields}".rstrip(),
+            file=sys.stderr,
+        )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Model loading
 # ──────────────────────────────────────────────────────────────────────────────
@@ -701,25 +711,55 @@ def export_template_partitioned_mlir(
     graph_prefill, graph_decode, output_dir: str
 ) -> dict[str, int | bool]:
     """Export unique prefill/decode templates and complete static wrappers."""
+    started = time.perf_counter()
     prefill_plan = build_transformer_partition_plan(graph_prefill)
+    template_perf(
+        "deepseek.prefill.template_analysis",
+        started,
+        instances=len(prefill_plan.partition_sequence),
+        templates=len(prefill_plan.templates),
+    )
     prefill_driver = TemplatePartitionedGraphDriver(graph_prefill, prefill_plan)
+    started = time.perf_counter()
     prefill_subgraphs = prefill_driver.build_template_subgraphs()
+    template_perf(
+        "deepseek.prefill.template_materialization",
+        started,
+        materialized_bodies=len(prefill_subgraphs),
+    )
     if len(prefill_plan.templates) != len(prefill_subgraphs):
         raise ValueError(
             "prefill template count does not match template subgraph count"
         )
+    started = time.perf_counter()
     for subgraph in prefill_subgraphs:
         subgraph.lower_to_top_level_ir()
+    template_perf("deepseek.prefill.mlir_lowering_emission", started)
 
+    started = time.perf_counter()
     decode_plan = build_transformer_partition_plan(graph_decode)
+    template_perf(
+        "deepseek.decode.template_analysis",
+        started,
+        instances=len(decode_plan.partition_sequence),
+        templates=len(decode_plan.templates),
+    )
     decode_driver = TemplatePartitionedGraphDriver(graph_decode, decode_plan)
+    started = time.perf_counter()
     decode_subgraphs = decode_driver.build_template_subgraphs()
+    template_perf(
+        "deepseek.decode.template_materialization",
+        started,
+        materialized_bodies=len(decode_subgraphs),
+    )
     if len(decode_plan.templates) != len(decode_subgraphs):
         raise ValueError(
             "decode template count does not match template subgraph count"
         )
+    started = time.perf_counter()
     for subgraph in decode_subgraphs:
         subgraph.lower_to_top_level_ir()
+    template_perf("deepseek.decode.mlir_lowering_emission", started)
 
     partition_dir = os.path.join(output_dir, "layer_partitioned")
     os.makedirs(partition_dir, exist_ok=True)

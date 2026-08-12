@@ -31,6 +31,8 @@
 import argparse
 import json
 import os
+import sys
+import time
 
 import numpy
 import torch
@@ -66,6 +68,16 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
+
+def perf(name, started, **counts):
+    if os.environ.get("BUDDY_TEMPLATE_PERF") == "1":
+        fields = " ".join(f"{key}={value}" for key, value in counts.items())
+        print(
+            f"[template-perf] phase={name} seconds={time.monotonic() - started:.6f} {fields}".rstrip(),
+            file=sys.stderr,
+        )
+
+
 output_dir = args.output_dir
 os.makedirs(output_dir, exist_ok=True)
 
@@ -80,8 +92,10 @@ if not model_path:
 print(f"[import-whisper] Loading model from: {model_path}")
 
 # Initialize the model from the specified model path.
+started = time.monotonic()
 model = WhisperForConditionalGeneration.from_pretrained(model_path)
 model.config.use_cache = False
+perf("whisper.model_load", started)
 
 # Generate placeholder for inputs.
 input_features = torch.zeros(size=(1, 80, 3000), dtype=torch.float32)
@@ -115,14 +129,18 @@ dynamo_compiler = DynamoCompiler(
 )
 
 # Import the model into MLIR module and parameters.
+started = time.monotonic()
 with torch.no_grad():
     graphs = dynamo_compiler.importer(model, **inputs)
+perf("whisper.graph_capture_import", started, graphs=len(graphs))
 
 assert len(graphs) == 1
 graph = graphs[0]
 params = dynamo_compiler.imported_params[graph]
 pattern_list = [simply_fuse]
+started = time.monotonic()
 graph.fuse_ops(pattern_list)
+perf("whisper.graph_transforms", started)
 
 if args.experimental_template_partitioned:
     mlir_dir = os.path.join(output_dir, "layer_partitioned")
@@ -136,9 +154,22 @@ if args.experimental_template_partitioned:
         ):
             os.remove(os.path.join(mlir_dir, filename))
 
+    started = time.monotonic()
     plan = build_transformer_partition_plan(graph)
+    perf(
+        "whisper.template_analysis",
+        started,
+        instances=len(plan.partition_sequence),
+        templates=len(plan.templates),
+    )
     driver = TemplatePartitionedGraphDriver(graph, plan)
+    started = time.monotonic()
     subgraphs = driver.build_template_subgraphs()
+    perf(
+        "whisper.template_materialization",
+        started,
+        materialized_bodies=len(subgraphs),
+    )
     if len(subgraphs) != len(plan.templates):
         raise ValueError(
             "Whisper template count does not match materialized subgraph count: "
@@ -146,12 +177,14 @@ if args.experimental_template_partitioned:
         )
 
     template_files = []
+    started = time.monotonic()
     for unit, subgraph in zip(plan.templates, subgraphs, strict=True):
         subgraph.lower_to_top_level_ir()
         filename = f"{driver.template_symbol(unit.template_id)}.mlir"
         with open(os.path.join(partition_dir, filename), "w") as module_file:
             print(subgraph._imported_module, file=module_file)
         template_files.append(filename)
+    perf("whisper.mlir_lowering_emission", started)
 
     with open(os.path.join(partition_dir, "forward.mlir"), "w") as module_file:
         print(
@@ -169,6 +202,9 @@ if args.experimental_template_partitioned:
                 "templates": template_files,
             }
         ],
+        "layer_instances": len(plan.partition_sequence),
+        "template_classes": len(plan.templates),
+        "materialized_bodies": len(subgraphs),
     }
     with open(
         os.path.join(partition_dir, "partition_manifest.json"),
@@ -178,11 +214,13 @@ if args.experimental_template_partitioned:
         manifest_file.write("\n")
 else:
     driver = GraphDriver(graph)
+    started = time.monotonic()
     driver.subgraphs[0].lower_to_top_level_ir()
     with open(os.path.join(output_dir, "subgraph0.mlir"), "w") as module_file:
         print(driver.subgraphs[0]._imported_module, file=module_file)
     with open(os.path.join(output_dir, "forward.mlir"), "w") as module_file:
         print(driver.construct_main_graph(True), file=module_file)
+    perf("whisper.mlir_lowering_emission", started, materialized_bodies=1)
 
 all_param = numpy.concatenate(
     [param.detach().numpy().reshape([-1]) for param in params]
