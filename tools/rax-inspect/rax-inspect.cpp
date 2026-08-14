@@ -226,7 +226,10 @@ int main(int argc, char **argv) {
       std::cout << "  [" << co->id() << "] @"
                 << (co->name() ? co->name()->c_str() : "?")
                 << "  kind=" << rhal::rax::EnumNameCodeObjectKind(co->kind())
-                << "  uri=" << (co->uri() ? co->uri()->c_str() : "") << "\n";
+                << "  uri=" << (co->uri() ? co->uri()->c_str() : "");
+      if (co->entry_symbol() && co->entry_symbol()->size() != 0)
+        std::cout << "  entry_symbol=" << co->entry_symbol()->c_str();
+      std::cout << "\n";
     }
 
     // Functions
@@ -235,6 +238,31 @@ int main(int argc, char **argv) {
     for (uint32_t i = 0; i < nFunc; ++i) {
       auto f = m->functions()->Get(i);
       std::cout << "  @" << (f->name() ? f->name()->c_str() : "?") << "\n";
+      const auto nOps = f->ops() ? f->ops()->size() : 0;
+      for (uint32_t j = 0; j < nOps; ++j) {
+        auto op = f->ops()->Get(j);
+        std::cout << "    [" << j << "] "
+                  << rhal::rax::EnumNameOpKind(op->kind());
+        if (op->kind() == rhal::rax::OpKind_Dispatch) {
+          auto dispatch = op->dispatch();
+          std::cout << " code_object_id=" << dispatch->code_object_id()
+                    << " args=[";
+          const auto nArgs = dispatch->args() ? dispatch->args()->size() : 0;
+          for (uint32_t k = 0; k < nArgs; ++k) {
+            if (k != 0)
+              std::cout << ", ";
+            auto arg = dispatch->args()->Get(k);
+            if (arg->buffer_id() != 0)
+              std::cout << "buffer:" << arg->buffer_id();
+            else if (arg->constant_id() != 0)
+              std::cout << "constant:" << arg->constant_id();
+            else
+              std::cout << "scalar";
+          }
+          std::cout << "]";
+        }
+        std::cout << "\n";
+      }
     }
 
     if (hasPayload) {

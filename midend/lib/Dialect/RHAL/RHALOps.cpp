@@ -21,3 +21,19 @@
 
 #define GET_OP_CLASSES
 #include "RHAL/RHALOps.cpp.inc"
+
+mlir::LogicalResult buddy::rhal::FuncOp::verify() {
+  bool hasDispatch = (*this)->hasAttr("dispatch");
+  bool hasArgs = (*this)->hasAttr("args");
+
+  if (getBody().empty()) {
+    if (!hasDispatch || !hasArgs)
+      return emitOpError(
+          "legacy form requires 'dispatch' and 'args' attributes");
+  } else if (hasDispatch || hasArgs) {
+    return emitOpError(
+        "body form must not have legacy 'dispatch' or 'args' attributes");
+  }
+
+  return mlir::success();
+}
