@@ -74,6 +74,27 @@ inline std::filesystem::path buddyRaxPayloadBaseDir() {
 } // namespace detail
 
 struct ModelManifest {
+  struct RaxDispatchArgument {
+    enum class Kind { Buffer, Constant };
+
+    Kind kind;
+    uint32_t resourceId = 0;
+  };
+
+  struct RaxOperation {
+    rhal::rax::OpKind kind = rhal::rax::OpKind_Invalid;
+    uint32_t codeObjectId = 0;
+    std::vector<RaxDispatchArgument> arguments;
+  };
+
+  struct RaxFunction {
+    std::string name;
+    std::vector<uint32_t> inputs;
+    std::vector<uint32_t> outputs;
+    std::vector<uint32_t> temps;
+    std::vector<RaxOperation> ops;
+  };
+
   struct ResolvedCodeObject {
     uint32_t id = 0;
     std::string name;
@@ -115,6 +136,7 @@ struct ModelManifest {
   // flatbuffers.
   std::vector<ResolvedCodeObject> codeObjects;
   std::vector<ResolvedConstant> constants;
+  std::vector<RaxFunction> functions;
 
   // Load and resolve from a .rax manifest file.
   // Throws std::runtime_error on any parse / missing-field error.
@@ -530,6 +552,74 @@ struct ModelManifest {
 
         if (c->storage() == rhal::rax::ConstantStorage_External)
           out.weightPaths.push_back(rec.path);
+      }
+    }
+
+    // --- Functions -> owned, linear execution metadata --------------------
+    if (mod->functions()) {
+      for (auto function : *mod->functions()) {
+        if (!function || !function->name() || function->name()->size() == 0)
+          throw std::runtime_error("ModelManifest: function has no name");
+
+        RaxFunction functionRecord;
+        functionRecord.name = function->name()->str();
+        if (function->inputs())
+          functionRecord.inputs.assign(function->inputs()->begin(),
+                                       function->inputs()->end());
+        if (function->outputs())
+          functionRecord.outputs.assign(function->outputs()->begin(),
+                                        function->outputs()->end());
+        if (function->temps())
+          functionRecord.temps.assign(function->temps()->begin(),
+                                      function->temps()->end());
+
+        if (function->ops()) {
+          for (auto op : *function->ops()) {
+            if (!op)
+              throw std::runtime_error("ModelManifest: null op in function " +
+                                       functionRecord.name);
+
+            RaxOperation operation;
+            operation.kind = op->kind();
+            if (operation.kind == rhal::rax::OpKind_Dispatch) {
+              const auto *dispatch = op->dispatch();
+              if (!dispatch || dispatch->code_object_id() == 0)
+                throw std::runtime_error(
+                    "ModelManifest: malformed Dispatch in function " +
+                    functionRecord.name);
+              operation.codeObjectId = dispatch->code_object_id();
+
+              if (dispatch->args()) {
+                for (auto arg : *dispatch->args()) {
+                  if (!arg)
+                    throw std::runtime_error(
+                        "ModelManifest: null Dispatch argument in function " +
+                        functionRecord.name);
+
+                  const bool hasBuffer = arg->buffer_id() != 0;
+                  const bool hasConstant = arg->constant_id() != 0;
+                  if (arg->scalar() || hasBuffer == hasConstant)
+                    throw std::runtime_error(
+                        "ModelManifest: unsupported or malformed Dispatch "
+                        "argument in function " +
+                        functionRecord.name);
+
+                  operation.arguments.push_back(
+                      {hasBuffer ? RaxDispatchArgument::Kind::Buffer
+                                 : RaxDispatchArgument::Kind::Constant,
+                       hasBuffer ? arg->buffer_id() : arg->constant_id()});
+                }
+              }
+            } else if (operation.kind == rhal::rax::OpKind_Barrier &&
+                       !op->barrier()) {
+              throw std::runtime_error(
+                  "ModelManifest: malformed Barrier in function " +
+                  functionRecord.name);
+            }
+            functionRecord.ops.push_back(std::move(operation));
+          }
+        }
+        out.functions.push_back(std::move(functionRecord));
       }
     }
 
