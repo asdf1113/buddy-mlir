@@ -1,0 +1,22 @@
+rhal.module @rax_executor_mlir_e2e attributes {version = "0.1.0"} {
+  rhal.constant @params {id = 7 : i32, storage = "external",
+                         type = tensor<2xf32>, uri = "file:params.bin"}
+
+  rhal.codeobj @forward0 {id = 10 : i32, kind = "host_shared_lib",
+                          backend = "cpu",
+                          uri = "file:@RAX_EXECUTOR_MLIR_E2E_LIBRARY@",
+                          entry_symbol = "rax_forward0"}
+  rhal.codeobj @forward1 {id = 11 : i32, kind = "host_shared_lib",
+                          backend = "cpu",
+                          uri = "file:@RAX_EXECUTOR_MLIR_E2E_LIBRARY@",
+                          entry_symbol = "rax_forward1"}
+
+  rhal.buffer @input {space = "host", type = tensor<4xf32>}
+  rhal.buffer @scratch {space = "host", type = tensor<4xf32>}
+  rhal.buffer @output {space = "host", type = tensor<4xf32>}
+
+  rhal.func @forward {inputs = ["input"], outputs = ["output"]} body {
+    rhal.dispatch @forward0 [@params, @input, @scratch]
+    rhal.dispatch @forward1 [@params, @scratch, @output]
+  }
+}

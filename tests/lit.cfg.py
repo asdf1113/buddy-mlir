@@ -48,6 +48,19 @@ for candidate in openmp_runtime_candidates:
         break
 config.openmp_runtime_dir = openmp_runtime_dir
 config.substitutions.append(("%openmp_runtime_dir", config.openmp_runtime_dir))
+config.substitutions.append(
+    (
+        "%rax_executor_mlir_e2e_rhal",
+        os.path.join(
+            config.buddy_obj_root,
+            "tests",
+            "Interface",
+            "core",
+            "Inputs",
+            "RaxExecutorMlirE2E.rhal.mlir",
+        ),
+    )
+)
 
 llvm_config.with_system_environment(["HOME", "INCLUDE", "LIB", "TMP", "TEMP"])
 
@@ -87,6 +100,8 @@ tools = [
     "buddy-container-test",
     "buddy-audio-container-test",
     "buddy-text-container-test",
+    "buddy-rax-executor-test",
+    "buddy-rax-executor-mlir-e2e-test",
     "rax-inspect",
     "rax-pack",
     "mlir-runner",
