@@ -1847,6 +1847,9 @@ class ParallelTemplatePartitionedGraphDriver(TemplatePartitionedGraphDriver):
             )
         self._parallel_plan = parallel_plan
         self._rank = rank
+        self._parallel_segment_wrappers = {}
+        self._wrapper_parameter_bindings = {}
+        self._rank_parameter_layout = {}
 
     @property
     def subgraphs(self):
@@ -2023,3 +2026,254 @@ class ParallelTemplatePartitionedGraphDriver(TemplatePartitionedGraphDriver):
                 )
         self._subgraphs = materialized
         return self.subgraphs
+
+    def construct_parallel_segment_wrappers(self):
+        if self._parallel_segment_wrappers:
+            return list(self._parallel_segment_wrappers.values())
+
+        units = {unit.template_id: unit for unit in self._plan.templates}
+        templates = {
+            template.template_id: template
+            for template in self._parallel_plan.templates
+        }
+        parameter_metadata = {}
+
+        for instance_index, binding in enumerate(self._plan.instance_bindings):
+            unit = units[binding.template_id]
+            template = templates[binding.template_id]
+            layouts = {spec.value: spec for spec in template.value_layouts}
+            ingress = self._collective_ingress_map(template)
+            parameter_inputs = [
+                input_ref
+                for input_ref in unit.representative.interface.ordered_inputs
+                if input_ref.kind is RegionInputKind.PARAMETER
+            ]
+            parameter_slots = {
+                input_ref.value: slot
+                for slot, input_ref in enumerate(parameter_inputs)
+            }
+            shard_specs = {
+                spec.template_parameter_slot: spec
+                for spec in template.parameter_shards
+            }
+
+            for segment in template.segments:
+                region_index = getattr(
+                    binding.region, "layer_index", instance_index
+                )
+                region_label = (
+                    "layer"
+                    if hasattr(binding.region, "layer_index")
+                    else "region"
+                )
+                wrapper = Graph(
+                    self._graph._ops_registry,
+                    f"{self._graph._func_name}_{region_label}"
+                    f"{region_index}_seg{segment.segment_index}",
+                    self._graph.device,
+                    verbose=self._graph._verbose,
+                    verbose_path=self._graph._verbose_path,
+                )
+                placeholders = []
+                input_metas = []
+                parameter_placeholders = []
+                runtime_placeholders = []
+                wrapper_bindings = {}
+
+                for slot, value in enumerate(segment.ordered_inputs):
+                    try:
+                        layout = layouts[value]
+                    except KeyError as error:
+                        raise ValueError(
+                            f"segment input {value.op.name!r}:"
+                            f"{value.result_index} has no value layout"
+                        ) from error
+                    boundary = ingress.get((segment.segment_index, value))
+                    shape = (
+                        boundary.target_local_shapes[self._rank]
+                        if boundary is not None
+                        else layout.local_shapes[self._rank]
+                    )
+                    input_meta = self._rank_tensor_meta(value, shape)
+                    input_metas.append(input_meta)
+                    placeholder = PlaceholderOp()
+                    if value in parameter_slots:
+                        parameter_slot = parameter_slots[value]
+                        actual_parameter_index = binding.parameter_indices[
+                            parameter_slot
+                        ]
+                        actual_parameter = self._graph.params[
+                            actual_parameter_index
+                        ]
+                        placeholder.name = actual_parameter.name
+                        shard_spec = shard_specs.get(parameter_slot)
+                        actual_meta = graph_value_tensor_meta(
+                            GraphValueRef(actual_parameter)
+                        )
+                        actual_shape = list(actual_meta.shape)
+                        if shard_spec is not None:
+                            actual_shape[shard_spec.storage_shard_axis] = (
+                                shard_spec.rank_slices[self._rank].size
+                            )
+                        placeholder.tensor_meta = TensorMeta(
+                            tuple(actual_shape), actual_meta.dtype
+                        )
+                        parameter_placeholders.append(placeholder)
+                        wrapper_bindings[placeholder.name] = (
+                            actual_parameter_index
+                        )
+                        parameter_metadata.setdefault(
+                            actual_parameter_index,
+                            (actual_meta.dtype, tuple(actual_shape)),
+                        )
+                    else:
+                        placeholder.name = f"__wrapper_arg{slot}"
+                        placeholder.tensor_meta = input_meta
+                        runtime_placeholders.append(placeholder)
+                    placeholders.append(placeholder)
+
+                for placeholder in parameter_placeholders:
+                    wrapper.add_node(placeholder, NodeType.FakeNode)
+                for placeholder in runtime_placeholders:
+                    wrapper.add_node(placeholder, NodeType.InputNode)
+
+                declaration = FuncOp()
+                declaration.name = self.parallel_template_symbol(
+                    template.template_id, segment.segment_index
+                )
+                declaration.tensor_meta = {"shape": [], "dtype": []}
+                for input_meta in input_metas:
+                    declaration.add_argument(input_meta)
+                for value in segment.ordered_outputs:
+                    meta = self._rank_tensor_meta(
+                        value, layouts[value].local_shapes[self._rank]
+                    )
+                    declaration.tensor_meta["shape"].append(meta.shape)
+                    declaration.tensor_meta["dtype"].append(meta.dtype)
+                wrapper.add_node(declaration)
+
+                call = CallOp()
+                call.name = "segment_call"
+                call.call_func_name = declaration.name
+                call.tensor_meta = {
+                    "shape": list(declaration.tensor_meta["shape"]),
+                    "dtype": list(declaration.tensor_meta["dtype"]),
+                }
+                for placeholder in placeholders:
+                    call.add_argument(placeholder.name)
+                wrapper.add_node(call)
+
+                output = OutputOp()
+                output.name = "output"
+                for output_index in range(len(segment.ordered_outputs)):
+                    if output_index == 0:
+                        output.add_argument(call.name)
+                        continue
+                    getitem = GetItemOp()
+                    getitem.name = f"__wrapper_result{output_index}"
+                    getitem.add_argument(call.name)
+                    getitem.add_argument(output_index)
+                    wrapper.add_node(getitem)
+                    output.add_argument(getitem.name)
+                wrapper.add_node(output)
+
+                key = (instance_index, segment.segment_index)
+                self._parallel_segment_wrappers[key] = wrapper
+                self._wrapper_parameter_bindings[key] = wrapper_bindings
+
+        dtype_offsets = defaultdict(int)
+        for parameter_index in sorted(parameter_metadata):
+            dtype, shape = parameter_metadata[parameter_index]
+            numel = functools.reduce(lambda x, y: x * y, shape, 1)
+            self._rank_parameter_layout[parameter_index] = {
+                "dtype": dtype,
+                "shape": shape,
+                "offset": dtype_offsets[dtype],
+                "numel": numel,
+            }
+            dtype_offsets[dtype] += numel
+
+        return list(self._parallel_segment_wrappers.values())
+
+    def build_rank_parameter_pack(self, params, output_dir):
+        if not self._rank_parameter_layout:
+            self.construct_parallel_segment_wrappers()
+
+        parameter_shards = {}
+        for template in self._parallel_plan.templates:
+            shard_specs = {
+                spec.template_parameter_slot: spec
+                for spec in template.parameter_shards
+            }
+            for binding in self._plan.instance_bindings:
+                if binding.template_id != template.template_id:
+                    continue
+                for parameter_slot, spec in shard_specs.items():
+                    parameter_shards[
+                        binding.parameter_indices[parameter_slot]
+                    ] = spec
+
+        os.makedirs(output_dir, exist_ok=True)
+        dtypes = {
+            layout["dtype"] for layout in self._rank_parameter_layout.values()
+        }
+        for dtype in sorted(dtypes, key=str):
+            dtype_name = dtype.value
+            filename = os.path.join(
+                output_dir, f"rank{self._rank}_params_{dtype_name}.data"
+            )
+            current_offset = 0
+            with open(filename, "wb") as file:
+                for parameter_index, layout in sorted(
+                    self._rank_parameter_layout.items()
+                ):
+                    if layout["dtype"] != dtype:
+                        continue
+
+                    tensor = params[parameter_index]
+                    spec = parameter_shards.get(parameter_index)
+                    if spec is not None:
+                        rank_slice = spec.rank_slices[self._rank]
+                        slices = [slice(None)] * tensor.ndim
+                        slices[spec.storage_shard_axis] = slice(
+                            rank_slice.offset,
+                            rank_slice.offset + rank_slice.size,
+                        )
+                        local_tensor = tensor[tuple(slices)]
+                    else:
+                        local_tensor = tensor
+
+                    if tuple(local_tensor.shape) != layout["shape"]:
+                        raise ValueError(
+                            f"parameter {parameter_index} rank-local shape "
+                            "does not match _rank_parameter_layout"
+                        )
+                    if current_offset != layout["offset"]:
+                        raise ValueError(
+                            f"parameter {parameter_index} offset does not "
+                            "follow _rank_parameter_layout"
+                        )
+
+                    local_tensor = local_tensor.detach().cpu().contiguous()
+                    tensor_dtype_name = str(local_tensor.dtype).removeprefix(
+                        "torch."
+                    )
+                    if tensor_dtype_name != dtype_name:
+                        raise ValueError(
+                            f"parameter {parameter_index} dtype "
+                            f"{tensor_dtype_name} does not match layout dtype "
+                            f"{dtype_name}"
+                        )
+                    if dtype_name == "bfloat16":
+                        flat = (
+                            local_tensor.view(torch.uint16).numpy().reshape(-1)
+                        )
+                    else:
+                        flat = local_tensor.numpy().reshape(-1)
+                    if flat.size != layout["numel"]:
+                        raise ValueError(
+                            f"parameter {parameter_index} rank-local size "
+                            "does not match _rank_parameter_layout"
+                        )
+                    flat.tofile(file)
+                    current_offset += flat.size
