@@ -24,6 +24,7 @@ import functools
 from enum import Enum, auto
 from pathlib import Path
 from types import FunctionType
+from typing import TYPE_CHECKING
 
 import buddy_mlir.dialects.func as func
 import buddy_mlir.ir as ir
@@ -34,6 +35,35 @@ from buddy_mlir.passmanager import PassManager
 
 from .operation import *
 from .type import *
+
+if TYPE_CHECKING:
+    from .structure_analysis import GraphStructureAnalysisResult
+    from .transformer_partition import GraphStructureIndex, TemplateIndex
+
+
+def _replace_node_name(value, old_name, new_name, node_table):
+    if isinstance(value, str):
+        if value == old_name and value in node_table:
+            return new_name
+        return value
+    if isinstance(value, list):
+        return [
+            _replace_node_name(item, old_name, new_name, node_table)
+            for item in value
+        ]
+    if isinstance(value, tuple):
+        return tuple(
+            _replace_node_name(item, old_name, new_name, node_table)
+            for item in value
+        )
+    if isinstance(value, dict):
+        return {
+            _replace_node_name(
+                key, old_name, new_name, node_table
+            ): _replace_node_name(item, old_name, new_name, node_table)
+            for key, item in value.items()
+        }
+    return value
 
 
 def make_output_memref_descriptor(ranks, dtypes):
@@ -154,6 +184,55 @@ class Graph:
         self.op_groups: dict[str, list[Op]] = {}
         self.group_map_device: dict[str, DeviceType] = {}
         self._enable_external_calls = enable_external_calls
+        self._structure_index: GraphStructureIndex | None = None
+        self._template_index: TemplateIndex | None = None
+
+    @property
+    def structure_index(self) -> "GraphStructureIndex | None":
+        """The cached structural index, or ``None`` before explicit build."""
+        return self._structure_index
+
+    @property
+    def template_index(self) -> "TemplateIndex | None":
+        """The cached layer-template index, or ``None`` before recognition."""
+        return self._template_index
+
+    def analyze_structure(
+        self, enable_template_recognition: bool = False
+    ) -> "GraphStructureAnalysisResult":
+        """Explicitly build and cache structural and optional template indexes."""
+        from .structure_analysis import GraphStructureAnalysisResult
+        from .transformer_partition import RegionBuilder
+
+        if self._structure_index is None:
+            recognizer = None
+            if enable_template_recognition:
+                from .transformer_partition import TemplateRecognizer
+
+                recognizer = TemplateRecognizer()
+            self._structure_index = RegionBuilder(self).build(recognizer)
+            if recognizer is not None:
+                self._template_index = recognizer.finish()
+        elif enable_template_recognition and self._template_index is None:
+            from .transformer_partition import build_template_index
+
+            self._template_index = build_template_index(
+                self, self._structure_index
+            )
+
+        return GraphStructureAnalysisResult(
+            structure_index=self._structure_index,
+            template_index=self._template_index,
+        )
+
+    def build_structure_index(self) -> "GraphStructureIndex":
+        """Build and cache the graph's non-mutating structural description.
+
+        Call this after all frontend graph transforms and before structural
+        planning or lowering. Version one has no automatic invalidation, so the
+        graph must not be mutated in place after this method is called.
+        """
+        return self.analyze_structure().structure_index
 
     @property
     def ttir_module(self):
@@ -314,21 +393,36 @@ class Graph:
         newnode._tensor_meta = node.tensor_meta
         newnode._op_type = node._op_type
         newnode.trace_meta = node.trace_meta
+        newnode._source_meta = node._source_meta
 
         for i in node._children:
             newnode.add_children(i)
         users = [self.node_table[i] for i in node._children]
         for user in users:
-            if node.name in user._parents:
-                user._parents[user._parents.index(node.name)] = newnode.name
-            user.args[user.args.index(node.name)] = newnode.name
+            user._arguments = _replace_node_name(
+                user.args, node.name, newnode.name, self.node_table
+            )
+            user._keyword_arguments = _replace_node_name(
+                user.kwargs, node.name, newnode.name, self.node_table
+            )
+            user._parents[:] = [
+                newnode.name if parent == node.name else parent
+                for parent in user._parents
+            ]
         node._children.clear()
         # deal with parents+args
         for i in node._parents:
             newnode.add_parent(i)
-        parents = [self.node_table[i] for i in node._parents]
-        for parent in parents:
-            parent._children[parent._children.index(node.name)] = newnode.name
+
+        # A producer can record this node as a user even when the dependency is
+        # carried in kwargs and is therefore absent from node._parents. Update
+        # every actual reverse use so replacing a consumer cannot leave its old
+        # name dangling in a producer's children list.
+        for producer in self._body:
+            producer._children[:] = [
+                newnode.name if child == node.name else child
+                for child in producer._children
+            ]
         node._parents.clear()
         # update node table
         self._body[self._body.index(node)] = newnode
@@ -537,20 +631,29 @@ class Graph:
         for transform_func in func_list:
             transform_func(self)
 
-    def lower_to_top_level_ir(self):
+    def lower_to_top_level_ir(
+        self,
+        do_param_pack: bool = False,
+        param_pack_sizes=None,
+        param_pack_offsets=None,
+    ):
         """
         Lowers the graph to top-level MLIR dialects.
 
         Parameters:
-        - do_params_pack: bool, optional (default=False)
+        - do_param_pack: bool, optional (default=False)
             Flag indicating whether to perform parameters packing to one memref.
+        - param_pack_sizes: dict, optional
+            Explicit total element count for each dtype pack.
+        - param_pack_offsets: dict, optional
+            Explicit element offset for each parameter placeholder name.
 
         Returns:
         None
 
         Example:
         graph_instance = Graph(inputs, fake_params, ops_registry, func_name)
-        graph_instance.lower_to_top_level_ir(do_params_pack=True)
+        graph_instance.lower_to_top_level_ir(do_param_pack=True)
         # The graph is now lowered to top-level MLIR dialects
         """
         with ir.Location.unknown(self._ctx):
@@ -560,20 +663,30 @@ class Graph:
                 self.inputs_shapes,
                 self._func_name,
                 self._ops_registry,
-                False,
+                do_param_pack,
                 self.device,
                 verbose=self._verbose,
                 verbose_path=self._verbose_path,
                 enable_external_calls=self._enable_external_calls,
+                param_pack_sizes=param_pack_sizes,
+                param_pack_offsets=param_pack_offsets,
             )
-            self._imported_module = fx_importer.import_graph()
+            self._imported_module = (
+                fx_importer.import_main_graph()
+                if do_param_pack
+                else fx_importer.import_graph()
+            )
             outputs = fx_importer.get_output_nodes()
             self._outputs = outputs
         self._output_memref = []
         output_ranks = []
         output_dtypes = []
         for out_node in outputs:
-            out_type = ir.RankedTensorType(out_node.type)
+            out_type = (
+                ir.MemRefType(out_node.type)
+                if do_param_pack
+                else ir.RankedTensorType(out_node.type)
+            )
             shape = list(out_type.shape)
             dtype = out_type.element_type
             match str(dtype):
@@ -736,6 +849,8 @@ class GraphImporter:
         verbose=False,
         verbose_path: str | Path | None = None,
         enable_external_calls: bool = False,
+        param_pack_sizes=None,
+        param_pack_offsets=None,
     ):
         """
         Initializes the buddy Graph importer.
@@ -768,6 +883,13 @@ class GraphImporter:
         self._ops_registry = ops_registry
         self._current_param_pack_offset = None
         self._enable_external_calls = enable_external_calls
+        if (param_pack_sizes is None) != (param_pack_offsets is None):
+            raise ValueError(
+                "param_pack_sizes and param_pack_offsets must be provided "
+                "together"
+            )
+        self._param_pack_sizes = param_pack_sizes
+        self._param_pack_offsets = param_pack_offsets
 
     def _verbose_output(self):
         if self._verbose_path is None:
@@ -845,18 +967,26 @@ class GraphImporter:
         graph_instance._pack_params()
         # The parameters of the graph are now packed to one memref.
         """
-        dtypes = list(set([param.dtype for param in self._params_shapes]))
+        if self._param_pack_sizes is not None:
+            dtypes = list(self._param_pack_sizes)
+        else:
+            dtypes = list(set([param.dtype for param in self._params_shapes]))
         dtypes.sort(key=str)
         self._current_param_pack_offset = dict.fromkeys(dtypes, 0)
         for dtype in dtypes:
-            params_of_dtype = [
-                param for param in self._params_shapes if param.dtype == dtype
-            ]
-            param_total_size = 0
-            for param in params_of_dtype:
-                param_total_size += functools.reduce(
-                    lambda x, y: x * y, list(param.shape), 1
-                )
+            if self._param_pack_sizes is not None:
+                param_total_size = self._param_pack_sizes[dtype]
+            else:
+                params_of_dtype = [
+                    param
+                    for param in self._params_shapes
+                    if param.dtype == dtype
+                ]
+                param_total_size = 0
+                for param in params_of_dtype:
+                    param_total_size += functools.reduce(
+                        lambda x, y: x * y, list(param.shape), 1
+                    )
             mlir_dtype = self._str_to_mlir_dtype(dtype)
             self._param_packs.append(
                 ir.MemRefType.get([param_total_size], mlir_dtype)
@@ -1010,12 +1140,19 @@ class GraphImporter:
                 ).element_type == self._str_to_mlir_dtype(dtype):
                     pack_of_dtype = pack
                     break
+            if self._param_pack_offsets is None:
+                offset = self._current_param_pack_offset[dtype]
+            else:
+                offset = self._param_pack_offsets[str(node.name)]
             placeholder_name = self._ops_registry["param.extract"](
-                node, self._current_param_pack_offset[dtype], pack_of_dtype
+                node, offset, pack_of_dtype
             ).result
-            self._current_param_pack_offset[dtype] += functools.reduce(
-                lambda x, y: x * y, list(node.tensor_meta["shape"]), 1
-            )
+            if self._param_pack_offsets is None:
+                self._current_param_pack_offset[dtype] += functools.reduce(
+                    lambda x, y: x * y,
+                    list(node.tensor_meta["shape"]),
+                    1,
+                )
         elif self._do_param_pack:
             if len(self._params_shapes) > 0:
                 placeholder_name = args_list[
