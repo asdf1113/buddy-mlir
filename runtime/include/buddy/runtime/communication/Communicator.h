@@ -10,6 +10,8 @@
 #define BUDDY_RUNTIME_COMMUNICATION_COMMUNICATOR_H
 
 #include <cstddef>
+#include <cstdint>
+#include <vector>
 
 namespace buddy {
 namespace runtime {
@@ -26,6 +28,14 @@ public:
   virtual void broadcast(void *buffer, size_t bytes, int root) = 0;
   virtual void allReduce(const void *sendBuffer, void *recvBuffer, size_t count,
                          DataType dataType, ReductionOp reduction) = 0;
+  virtual void allGatherV(const void *sendBuffer, size_t sendCount,
+                          void *recvBuffer,
+                          const std::vector<int64_t> &recvCounts,
+                          const std::vector<int64_t> &displacements,
+                          DataType dataType) = 0;
+  virtual void reduceScatter(const void *sendBuffer, void *recvBuffer,
+                             const std::vector<int64_t> &recvCounts,
+                             DataType dataType, ReductionOp reduction) = 0;
 };
 
 } // namespace runtime

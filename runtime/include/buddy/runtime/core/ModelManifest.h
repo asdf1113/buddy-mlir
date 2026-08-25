@@ -98,6 +98,8 @@ struct ModelManifest {
   struct RaxCollectiveOperand {
     uint32_t inputBufferId = 0;
     uint32_t outputBufferId = 0;
+    std::vector<int64_t> recvCounts;
+    std::vector<int64_t> displacements;
   };
 
   struct RaxOperation {
@@ -684,9 +686,19 @@ struct ModelManifest {
                     throw std::runtime_error(
                         "ModelManifest: null Collective operand in function " +
                         functionRecord.name);
+                  RaxCollectiveOperand operandRecord;
+                  operandRecord.inputBufferId = operand->input_buffer_id();
+                  operandRecord.outputBufferId = operand->output_buffer_id();
+                  if (operand->recv_counts())
+                    operandRecord.recvCounts.assign(
+                        operand->recv_counts()->begin(),
+                        operand->recv_counts()->end());
+                  if (operand->displacements())
+                    operandRecord.displacements.assign(
+                        operand->displacements()->begin(),
+                        operand->displacements()->end());
                   operation.collectiveOperands.push_back(
-                      {operand->input_buffer_id(),
-                       operand->output_buffer_id()});
+                      std::move(operandRecord));
                 }
               }
             } else if (operation.kind == rhal::rax::OpKind_Barrier &&
