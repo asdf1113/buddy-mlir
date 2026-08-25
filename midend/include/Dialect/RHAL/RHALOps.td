@@ -227,4 +227,30 @@ def RHAL_DispatchOp : RHAL_Op<"dispatch"> {
   }];
 }
 
+//===----------------------------------------------------------------------===//
+// rhal.collective — collective communication inside a schedule
+//
+// Syntax:
+//   rhal.collective [@buffer1, @buffer2, ...] {
+//     kind = "all_reduce", reduction = "sum"
+//   }
+//===----------------------------------------------------------------------===//
+
+def RHAL_CollectiveOp : RHAL_Op<"collective"> {
+  let summary = "Collective communication over ordered buffer arguments.";
+
+  let arguments = (ins
+    FlatSymbolRefArrayAttr:$buffers,
+    StrAttr:$kind,
+    OptionalAttr<StrAttr>:$reduction,
+    OptionalAttr<I32Attr>:$root
+  );
+
+  let assemblyFormat = [{
+    $buffers attr-dict
+  }];
+
+  let hasVerifier = 1;
+}
+
 #endif // BUDDY_MIDEND_RHAL_RHALOPS_TD

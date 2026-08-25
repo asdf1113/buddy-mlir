@@ -37,3 +37,23 @@ mlir::LogicalResult buddy::rhal::FuncOp::verify() {
 
   return mlir::success();
 }
+
+mlir::LogicalResult buddy::rhal::CollectiveOp::verify() {
+  mlir::StringAttr kind = getKindAttr();
+  mlir::StringAttr reduction = getReductionAttr();
+  mlir::IntegerAttr root = getRootAttr();
+
+  if (kind.getValue() == "all_reduce") {
+    if (!reduction || reduction.getValue() != "sum")
+      return emitOpError("with kind 'all_reduce' requires reduction = \"sum\"");
+    return mlir::success();
+  }
+
+  if (kind.getValue() == "broadcast") {
+    if (!root)
+      return emitOpError("with kind 'broadcast' requires a 'root' attribute");
+    return mlir::success();
+  }
+
+  return emitOpError("has unsupported kind '") << kind.getValue() << "'";
+}
