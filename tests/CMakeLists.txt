@@ -28,6 +28,14 @@ if(BUDDY_RUNTIME_ENABLE_MPI)
     buddy-rax-executor-mpi-e2e-test
     buddy-rax-executor-mpi-e2e-test-kernels
   )
+  if(BUDDY_MLIR_ENABLE_PYTHON_PACKAGES)
+    list(APPEND BUDDY_TEST_DEPENDS
+      buddy-rax-tp-frontend-mpi-e2e-test
+      buddy-rax-tp-frontend-rank0
+      buddy-rax-tp-frontend-rank1
+      buddy-rax-tp-frontend-rax
+    )
+  endif()
 endif()
 
 if(BUDDY_ENABLE_OPENCV)
