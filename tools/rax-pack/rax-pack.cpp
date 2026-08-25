@@ -31,6 +31,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "buddy/runtime/rax/RAX.h"
@@ -430,12 +431,19 @@ int main(int argc, char **argv) {
       std::string codeObject;
       std::vector<std::string> args;
     };
+    struct CollectiveRec {
+      CollectiveKind kind;
+      std::vector<std::string> buffers;
+      ReductionKind reduction;
+      int32_t root;
+    };
+    using FuncOpRec = std::variant<DispatchRec, CollectiveRec>;
     struct FuncRec {
       std::string name;
       std::vector<std::string> inputs;
       std::vector<std::string> outputs;
       bool hasBody;
-      std::vector<DispatchRec> dispatches;
+      std::vector<FuncOpRec> ops;
     };
 
     std::vector<BufRec> buffers;
@@ -498,21 +506,43 @@ int main(int argc, char **argv) {
           for (auto a : fo->getAttrOfType<mlir::ArrayAttr>("args"))
             dispatch.args.push_back(
                 mlir::cast<mlir::StringAttr>(a).getValue().str());
-          r.dispatches.push_back(std::move(dispatch));
+          r.ops.push_back(std::move(dispatch));
         } else {
           for (auto &bodyOp : fo.getBody().front()) {
-            auto dispatch = mlir::dyn_cast<buddy::rhal::DispatchOp>(&bodyOp);
-            if (!dispatch)
-              throw std::runtime_error(
-                  "rhal.func @" + r.name + ": unsupported body operation '" +
-                  bodyOp.getName().getStringRef().str() + "'");
+            if (auto dispatch =
+                    mlir::dyn_cast<buddy::rhal::DispatchOp>(&bodyOp)) {
+              DispatchRec record;
+              record.codeObject = dispatch.getCodeObject().str();
+              for (auto a : dispatch.getArgs())
+                record.args.push_back(
+                    mlir::cast<mlir::FlatSymbolRefAttr>(a).getValue().str());
+              r.ops.push_back(std::move(record));
+              continue;
+            }
 
-            DispatchRec record;
-            record.codeObject = dispatch.getCodeObject().str();
-            for (auto a : dispatch.getArgs())
-              record.args.push_back(
-                  mlir::cast<mlir::FlatSymbolRefAttr>(a).getValue().str());
-            r.dispatches.push_back(std::move(record));
+            if (auto collective =
+                    mlir::dyn_cast<buddy::rhal::CollectiveOp>(&bodyOp)) {
+              CollectiveRec record{
+                  CollectiveKind_Invalid, {}, ReductionKind_Invalid, -1};
+              if (collective.getKind() == "all_reduce") {
+                record.kind = CollectiveKind_AllReduce;
+                record.reduction = ReductionKind_Sum;
+              } else {
+                record.kind = CollectiveKind_Broadcast;
+                record.root = *collective.getRoot();
+              }
+              for (auto buffer : collective.getBuffers())
+                record.buffers.push_back(
+                    mlir::cast<mlir::FlatSymbolRefAttr>(buffer)
+                        .getValue()
+                        .str());
+              r.ops.push_back(std::move(record));
+              continue;
+            }
+
+            throw std::runtime_error(
+                "rhal.func @" + r.name + ": unsupported body operation '" +
+                bodyOp.getName().getStringRef().str() + "'");
           }
         }
         funcs.push_back(std::move(r));
@@ -638,7 +668,27 @@ int main(int argc, char **argv) {
     std::vector<flatbuffers::Offset<Function>> fbFuncs;
     for (auto &fr : funcs) {
       std::vector<flatbuffers::Offset<Op>> ops;
-      for (auto &dispatch : fr.dispatches) {
+      for (auto &op : fr.ops) {
+        if (auto *collective = std::get_if<CollectiveRec>(&op)) {
+          std::vector<flatbuffers::Offset<CollectiveOperand>> operands;
+          for (auto &name : collective->buffers) {
+            auto bufferIt = bufNameToId.find(name);
+            if (bufferIt == bufNameToId.end())
+              throw std::runtime_error("rhal.func @" + fr.name +
+                                       ": unknown buffer '" + name +
+                                       "' in collective operands");
+            operands.push_back(
+                CreateCollectiveOperand(b, bufferIt->second, bufferIt->second));
+          }
+          auto collectiveOp =
+              CreateCollectiveOp(b, collective->kind, b.CreateVector(operands),
+                                 collective->reduction, collective->root, 0);
+          ops.push_back(
+              CreateOp(b, OpKind_Collective, 0, 0, 0, 0, 0, 0, collectiveOp));
+          continue;
+        }
+
+        auto &dispatch = std::get<DispatchRec>(op);
         auto codeIt = codeNameToId.find(dispatch.codeObject);
         if (codeIt == codeNameToId.end())
           throw std::runtime_error("rhal.func @" + fr.name +

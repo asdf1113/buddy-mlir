@@ -260,6 +260,27 @@ int main(int argc, char **argv) {
               std::cout << "scalar";
           }
           std::cout << "]";
+        } else if (op->kind() == rhal::rax::OpKind_Collective) {
+          auto collective = op->collective();
+          std::cout << " kind="
+                    << rhal::rax::EnumNameCollectiveKind(collective->kind());
+          if (collective->kind() == rhal::rax::CollectiveKind_AllReduce)
+            std::cout << " reduction="
+                      << rhal::rax::EnumNameReductionKind(
+                             collective->reduction());
+          else if (collective->kind() == rhal::rax::CollectiveKind_Broadcast)
+            std::cout << " root=" << collective->root();
+          std::cout << " operands=[";
+          const auto nOperands =
+              collective->operands() ? collective->operands()->size() : 0;
+          for (uint32_t k = 0; k < nOperands; ++k) {
+            if (k != 0)
+              std::cout << ", ";
+            auto operand = collective->operands()->Get(k);
+            std::cout << operand->input_buffer_id() << "->"
+                      << operand->output_buffer_id();
+          }
+          std::cout << "]";
         }
         std::cout << "\n";
       }

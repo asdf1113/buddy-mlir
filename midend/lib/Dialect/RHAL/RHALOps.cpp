@@ -39,6 +39,9 @@ mlir::LogicalResult buddy::rhal::FuncOp::verify() {
 }
 
 mlir::LogicalResult buddy::rhal::CollectiveOp::verify() {
+  if (getBuffers().empty())
+    return emitOpError("requires at least one buffer");
+
   mlir::StringAttr kind = getKindAttr();
   mlir::StringAttr reduction = getReductionAttr();
   mlir::IntegerAttr root = getRootAttr();
@@ -52,6 +55,8 @@ mlir::LogicalResult buddy::rhal::CollectiveOp::verify() {
   if (kind.getValue() == "broadcast") {
     if (!root)
       return emitOpError("with kind 'broadcast' requires a 'root' attribute");
+    if (root.getInt() < 0)
+      return emitOpError("with kind 'broadcast' requires a non-negative root");
     return mlir::success();
   }
 
