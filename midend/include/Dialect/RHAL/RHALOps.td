@@ -237,9 +237,12 @@ def RHAL_CollectiveOp : RHAL_Op<"collective"> {
 
   let arguments = (ins
     FlatSymbolRefArrayAttr:$buffers,
+    OptionalAttr<FlatSymbolRefArrayAttr>:$output_buffers,
     StrAttr:$kind,
     OptionalAttr<StrAttr>:$reduction,
-    OptionalAttr<I32Attr>:$root
+    OptionalAttr<I32Attr>:$root,
+    OptionalAttr<DenseI64ArrayAttr>:$recv_counts,
+    OptionalAttr<DenseI64ArrayAttr>:$displacements
   );
 
   let assemblyFormat = [{

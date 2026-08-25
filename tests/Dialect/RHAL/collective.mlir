@@ -15,4 +15,16 @@ rhal.module @collectives {
     kind = "broadcast",
     root = 0 : i32
   }
+  rhal.collective [@a] {
+    kind = "all_gatherv",
+    output_buffers = [@b],
+    recv_counts = array<i64: 2, 3>,
+    displacements = array<i64: 0, 2>
+  }
+  rhal.collective [@mask] {
+    kind = "reduce_scatter",
+    output_buffers = [@cos],
+    recv_counts = array<i64: 2, 2>,
+    reduction = "sum"
+  }
 }

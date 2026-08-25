@@ -432,10 +432,13 @@ int main(int argc, char **argv) {
       std::vector<std::string> args;
     };
     struct CollectiveRec {
-      CollectiveKind kind;
-      std::vector<std::string> buffers;
-      ReductionKind reduction;
-      int32_t root;
+      CollectiveKind kind = CollectiveKind_Invalid;
+      std::vector<std::string> inputBuffers;
+      std::vector<std::string> outputBuffers;
+      ReductionKind reduction = ReductionKind_Invalid;
+      int32_t root = -1;
+      std::vector<int64_t> recvCounts;
+      std::vector<int64_t> displacements;
     };
     using FuncOpRec = std::variant<DispatchRec, CollectiveRec>;
     struct FuncRec {
@@ -522,20 +525,37 @@ int main(int argc, char **argv) {
 
             if (auto collective =
                     mlir::dyn_cast<buddy::rhal::CollectiveOp>(&bodyOp)) {
-              CollectiveRec record{
-                  CollectiveKind_Invalid, {}, ReductionKind_Invalid, -1};
+              CollectiveRec record;
               if (collective.getKind() == "all_reduce") {
                 record.kind = CollectiveKind_AllReduce;
                 record.reduction = ReductionKind_Sum;
-              } else {
+              } else if (collective.getKind() == "broadcast") {
                 record.kind = CollectiveKind_Broadcast;
                 record.root = *collective.getRoot();
+              } else if (collective.getKind() == "all_gatherv") {
+                record.kind = CollectiveKind_AllGatherV;
+              } else {
+                record.kind = CollectiveKind_ReduceScatter;
+                record.reduction = ReductionKind_Sum;
               }
               for (auto buffer : collective.getBuffers())
-                record.buffers.push_back(
+                record.inputBuffers.push_back(
                     mlir::cast<mlir::FlatSymbolRefAttr>(buffer)
                         .getValue()
                         .str());
+              if (record.kind == CollectiveKind_AllGatherV ||
+                  record.kind == CollectiveKind_ReduceScatter) {
+                for (auto buffer : *collective.getOutputBuffers())
+                  record.outputBuffers.push_back(
+                      mlir::cast<mlir::FlatSymbolRefAttr>(buffer)
+                          .getValue()
+                          .str());
+                auto recvCounts = *collective.getRecvCounts();
+                record.recvCounts.assign(recvCounts.begin(), recvCounts.end());
+                if (auto displacements = collective.getDisplacements())
+                  record.displacements.assign(displacements->begin(),
+                                              displacements->end());
+              }
               r.ops.push_back(std::move(record));
               continue;
             }
@@ -671,14 +691,37 @@ int main(int argc, char **argv) {
       for (auto &op : fr.ops) {
         if (auto *collective = std::get_if<CollectiveRec>(&op)) {
           std::vector<flatbuffers::Offset<CollectiveOperand>> operands;
-          for (auto &name : collective->buffers) {
-            auto bufferIt = bufNameToId.find(name);
-            if (bufferIt == bufNameToId.end())
+          if (collective->kind == CollectiveKind_AllGatherV ||
+              collective->kind == CollectiveKind_ReduceScatter) {
+            auto inputIt = bufNameToId.find(collective->inputBuffers.front());
+            if (inputIt == bufNameToId.end())
               throw std::runtime_error("rhal.func @" + fr.name +
-                                       ": unknown buffer '" + name +
+                                       ": unknown buffer '" +
+                                       collective->inputBuffers.front() +
                                        "' in collective operands");
+            auto outputIt = bufNameToId.find(collective->outputBuffers.front());
+            if (outputIt == bufNameToId.end())
+              throw std::runtime_error("rhal.func @" + fr.name +
+                                       ": unknown buffer '" +
+                                       collective->outputBuffers.front() +
+                                       "' in collective operands");
+            auto recvCounts = b.CreateVector(collective->recvCounts);
+            flatbuffers::Offset<flatbuffers::Vector<int64_t>> displacements;
+            if (collective->kind == CollectiveKind_AllGatherV)
+              displacements = b.CreateVector(collective->displacements);
             operands.push_back(
-                CreateCollectiveOperand(b, bufferIt->second, bufferIt->second));
+                CreateCollectiveOperand(b, inputIt->second, outputIt->second,
+                                        recvCounts, displacements));
+          } else {
+            for (auto &name : collective->inputBuffers) {
+              auto bufferIt = bufNameToId.find(name);
+              if (bufferIt == bufNameToId.end())
+                throw std::runtime_error("rhal.func @" + fr.name +
+                                         ": unknown buffer '" + name +
+                                         "' in collective operands");
+              operands.push_back(CreateCollectiveOperand(b, bufferIt->second,
+                                                         bufferIt->second));
+            }
           }
           auto collectiveOp =
               CreateCollectiveOp(b, collective->kind, b.CreateVector(operands),
