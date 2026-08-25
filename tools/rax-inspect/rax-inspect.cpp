@@ -264,7 +264,8 @@ int main(int argc, char **argv) {
           auto collective = op->collective();
           std::cout << " kind="
                     << rhal::rax::EnumNameCollectiveKind(collective->kind());
-          if (collective->kind() == rhal::rax::CollectiveKind_AllReduce)
+          if (collective->kind() == rhal::rax::CollectiveKind_AllReduce ||
+              collective->kind() == rhal::rax::CollectiveKind_ReduceScatter)
             std::cout << " reduction="
                       << rhal::rax::EnumNameReductionKind(
                              collective->reduction());
@@ -279,6 +280,24 @@ int main(int argc, char **argv) {
             auto operand = collective->operands()->Get(k);
             std::cout << operand->input_buffer_id() << "->"
                       << operand->output_buffer_id();
+            if (auto recvCounts = operand->recv_counts()) {
+              std::cout << " recv_counts=[";
+              for (uint32_t l = 0; l < recvCounts->size(); ++l) {
+                if (l != 0)
+                  std::cout << ",";
+                std::cout << recvCounts->Get(l);
+              }
+              std::cout << "]";
+            }
+            if (auto displacements = operand->displacements()) {
+              std::cout << " displacements=[";
+              for (uint32_t l = 0; l < displacements->size(); ++l) {
+                if (l != 0)
+                  std::cout << ",";
+                std::cout << displacements->Get(l);
+              }
+              std::cout << "]";
+            }
           }
           std::cout << "]";
         }

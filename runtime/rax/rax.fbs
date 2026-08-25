@@ -157,7 +157,9 @@ enum OpKind : byte {
 enum CollectiveKind : byte {
   Invalid = 0,
   AllReduce = 1,
-  Broadcast = 2
+  Broadcast = 2,
+  AllGatherV = 3,
+  ReduceScatter = 4
 }
 
 enum ReductionKind : byte {
@@ -238,6 +240,8 @@ table BarrierOp {
 table CollectiveOperand {
   input_buffer_id:uint32;
   output_buffer_id:uint32;
+  recv_counts:[int64];
+  displacements:[int64];
 }
 
 table CollectiveOp {
