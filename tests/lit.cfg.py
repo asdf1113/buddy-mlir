@@ -61,6 +61,37 @@ config.substitutions.append(
         ),
     )
 )
+if "mpi" in config.available_features:
+    config.substitutions.append(("%mpiexec", config.mpiexec_executable))
+    config.substitutions.append(("%mpi_numproc_flag", config.mpi_numproc_flag))
+    config.substitutions.append(("%mpi_preflags", config.mpi_preflags))
+    config.substitutions.append(("%mpi_postflags", config.mpi_postflags))
+    config.substitutions.append(
+        (
+            "%rax_executor_mpi_e2e_rank0_rhal",
+            os.path.join(
+                config.buddy_obj_root,
+                "tests",
+                "Interface",
+                "core",
+                "Inputs",
+                "RaxExecutorMpiE2ERank0.rhal.mlir",
+            ),
+        )
+    )
+    config.substitutions.append(
+        (
+            "%rax_executor_mpi_e2e_rank1_rhal",
+            os.path.join(
+                config.buddy_obj_root,
+                "tests",
+                "Interface",
+                "core",
+                "Inputs",
+                "RaxExecutorMpiE2ERank1.rhal.mlir",
+            ),
+        )
+    )
 
 llvm_config.with_system_environment(["HOME", "INCLUDE", "LIB", "TMP", "TEMP"])
 
@@ -107,6 +138,9 @@ tools = [
     "rax-pack",
     "mlir-runner",
 ]
+
+if "mpi" in config.available_features:
+    tools.append("buddy-rax-executor-mpi-e2e-test")
 
 tools.extend(
     [

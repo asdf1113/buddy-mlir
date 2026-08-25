@@ -108,3 +108,32 @@ _add_test_executable(buddy-rax-executor-mlir-e2e-test
 add_dependencies(buddy-rax-executor-mlir-e2e-test
   buddy-rax-executor-mlir-e2e-test-kernels
 )
+
+if(BUDDY_RUNTIME_ENABLE_MPI)
+  add_library(buddy-rax-executor-mpi-e2e-test-kernels SHARED
+    Inputs/RaxExecutorMpiE2EKernels.cpp
+  )
+
+  set(RAX_EXECUTOR_MPI_E2E_LIBRARY
+    "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_SHARED_LIBRARY_PREFIX}buddy-rax-executor-mpi-e2e-test-kernels${CMAKE_SHARED_LIBRARY_SUFFIX}")
+  configure_file(
+    Inputs/RaxExecutorMpiE2ERank0.rhal.mlir.in
+    Inputs/RaxExecutorMpiE2ERank0.rhal.mlir
+    @ONLY
+  )
+  configure_file(
+    Inputs/RaxExecutorMpiE2ERank1.rhal.mlir.in
+    Inputs/RaxExecutorMpiE2ERank1.rhal.mlir
+    @ONLY
+  )
+
+  _add_test_executable(buddy-rax-executor-mpi-e2e-test
+    RaxExecutorMpiE2ETest.cpp
+    LINK_LIBS
+      buddy_runtime_execution
+      buddy_runtime_mpi
+  )
+  add_dependencies(buddy-rax-executor-mpi-e2e-test
+    buddy-rax-executor-mpi-e2e-test-kernels
+  )
+endif()

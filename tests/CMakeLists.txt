@@ -23,6 +23,13 @@ set(BUDDY_TEST_DEPENDS
   mlir-runner
   )
 
+if(BUDDY_RUNTIME_ENABLE_MPI)
+  list(APPEND BUDDY_TEST_DEPENDS
+    buddy-rax-executor-mpi-e2e-test
+    buddy-rax-executor-mpi-e2e-test-kernels
+  )
+endif()
+
 if(BUDDY_ENABLE_OPENCV)
   list(APPEND BUDDY_TEST_DEPENDS buddy-image-container-test)
 endif()
