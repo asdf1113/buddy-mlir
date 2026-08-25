@@ -17,6 +17,7 @@ config.test_format = lit.formats.ShTest(execute_external=False)
 # suffixes: A list of file extensions to treat as test files.
 config.suffixes = [".mlir", ".c", ".cpp"]
 if config.buddy_mlir_enable_python_packages:
+    config.available_features.add("python-packages")
     config.suffixes.append(".py")
 
 # test_source_root: The root path where tests are located.
@@ -92,6 +93,26 @@ if "mpi" in config.available_features:
             ),
         )
     )
+    stage2e_dir = os.path.join(
+        config.buddy_obj_root, "tests", "Interface", "core", "Stage2E"
+    )
+    for rank in range(2):
+        config.substitutions.append(
+            (
+                f"%rax_tp_frontend_rank{rank}_rax",
+                os.path.join(stage2e_dir, f"rank{rank}.rax"),
+            )
+        )
+        config.substitutions.append(
+            (
+                f"%rax_tp_frontend_rank{rank}_pack",
+                os.path.join(
+                    stage2e_dir,
+                    f"rank{rank}",
+                    f"rank{rank}_params_float32.data",
+                ),
+            )
+        )
 
 llvm_config.with_system_environment(["HOME", "INCLUDE", "LIB", "TMP", "TEMP"])
 
@@ -141,6 +162,8 @@ tools = [
 
 if "mpi" in config.available_features:
     tools.append("buddy-rax-executor-mpi-e2e-test")
+    if config.buddy_mlir_enable_python_packages:
+        tools.append("buddy-rax-tp-frontend-mpi-e2e-test")
 
 tools.extend(
     [
