@@ -25,6 +25,13 @@ public:
   void broadcast(void *buffer, size_t bytes, int root) override;
   void allReduce(const void *sendBuffer, void *recvBuffer, size_t count,
                  DataType dataType, ReductionOp reduction) override;
+  void allGatherV(const void *sendBuffer, size_t sendCount, void *recvBuffer,
+                  const std::vector<int64_t> &recvCounts,
+                  const std::vector<int64_t> &displacements,
+                  DataType dataType) override;
+  void reduceScatter(const void *sendBuffer, void *recvBuffer,
+                     const std::vector<int64_t> &recvCounts, DataType dataType,
+                     ReductionOp reduction) override;
 
 private:
   MPI_Comm communicator_;

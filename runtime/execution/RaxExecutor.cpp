@@ -10,7 +10,9 @@
 
 #include <dlfcn.h>
 
+#include <algorithm>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -226,6 +228,86 @@ void RaxExecutor::executeDispatch(const ModelManifest::RaxOperation &op) {
 void RaxExecutor::executeCollective(const ModelManifest::RaxOperation &op) {
   if (!communicator_)
     throw std::runtime_error("RaxExecutor: Collective requires a communicator");
+
+  if (op.collectiveKind == rhal::rax::CollectiveKind_AllGatherV ||
+      op.collectiveKind == rhal::rax::CollectiveKind_ReduceScatter) {
+    if (op.collectiveOperands.size() != 1)
+      throw std::runtime_error(
+          "RaxExecutor: variable Collective requires exactly one operand");
+
+    const auto &operand = op.collectiveOperands.front();
+    const HostBufferView input = resolveHostBuffer(operand.inputBufferId);
+    const HostBufferView output = resolveHostBuffer(operand.outputBufferId);
+    if (input.dtype != rhal::rax::DType_F32 ||
+        output.dtype != rhal::rax::DType_F32)
+      throw std::runtime_error(
+          "RaxExecutor: variable Collective requires F32 buffers");
+
+    const int communicatorSize = communicator_->size();
+    const int communicatorRank = communicator_->rank();
+    if (operand.recvCounts.size() != static_cast<size_t>(communicatorSize))
+      throw std::runtime_error(
+          "RaxExecutor: receive counts do not match communicator size");
+
+    if (op.collectiveKind == rhal::rax::CollectiveKind_AllGatherV) {
+      if (operand.displacements.size() != static_cast<size_t>(communicatorSize))
+        throw std::runtime_error(
+            "RaxExecutor: displacements do not match communicator size");
+
+      size_t requiredOutputElements = 0;
+      for (size_t i = 0; i < operand.recvCounts.size(); ++i) {
+        if (operand.recvCounts[i] < 0 || operand.displacements[i] < 0)
+          throw std::runtime_error(
+              "RaxExecutor: negative AllGatherV count or displacement");
+        const size_t count = static_cast<size_t>(operand.recvCounts[i]);
+        const size_t displacement =
+            static_cast<size_t>(operand.displacements[i]);
+        if (displacement > std::numeric_limits<size_t>::max() - count)
+          throw std::runtime_error(
+              "RaxExecutor: AllGatherV output extent overflows size_t");
+        requiredOutputElements =
+            std::max(requiredOutputElements, displacement + count);
+      }
+      if (input.elementCount !=
+          static_cast<size_t>(operand.recvCounts[communicatorRank]))
+        throw std::runtime_error(
+            "RaxExecutor: AllGatherV input element count mismatch");
+      if (output.elementCount < requiredOutputElements)
+        throw std::runtime_error(
+            "RaxExecutor: AllGatherV output buffer is too small");
+
+      communicator_->allGatherV(input.data, input.elementCount, output.data,
+                                operand.recvCounts, operand.displacements,
+                                DataType::F32);
+      return;
+    }
+
+    if (op.reductionKind != rhal::rax::ReductionKind_Sum)
+      throw std::runtime_error(
+          "RaxExecutor: ReduceScatter requires Sum reduction");
+    size_t totalInputElements = 0;
+    for (int64_t recvCount : operand.recvCounts) {
+      if (recvCount < 0)
+        throw std::runtime_error(
+            "RaxExecutor: negative ReduceScatter receive count");
+      const size_t count = static_cast<size_t>(recvCount);
+      if (totalInputElements > std::numeric_limits<size_t>::max() - count)
+        throw std::runtime_error(
+            "RaxExecutor: ReduceScatter input extent overflows size_t");
+      totalInputElements += count;
+    }
+    if (input.elementCount != totalInputElements)
+      throw std::runtime_error(
+          "RaxExecutor: ReduceScatter input element count mismatch");
+    if (output.elementCount !=
+        static_cast<size_t>(operand.recvCounts[communicatorRank]))
+      throw std::runtime_error(
+          "RaxExecutor: ReduceScatter output element count mismatch");
+
+    communicator_->reduceScatter(input.data, output.data, operand.recvCounts,
+                                 DataType::F32, ReductionOp::Sum);
+    return;
+  }
 
   if (op.collectiveKind == rhal::rax::CollectiveKind_Broadcast &&
       (op.root < 0 || op.root >= communicator_->size()))
