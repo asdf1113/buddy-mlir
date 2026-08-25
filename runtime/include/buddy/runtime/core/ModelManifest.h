@@ -74,6 +74,17 @@ inline std::filesystem::path buddyRaxPayloadBaseDir() {
 } // namespace detail
 
 struct ModelManifest {
+  struct RaxBuffer {
+    uint32_t id = 0;
+    std::string name;
+    rhal::rax::DType dtype = rhal::rax::DType_Invalid;
+    std::vector<int64_t> shape;
+    std::vector<int64_t> strides;
+    rhal::rax::Layout layout = rhal::rax::Layout_Any;
+    rhal::rax::MemorySpace memorySpace = rhal::rax::MemorySpace_Any;
+    std::unordered_map<std::string, std::string> attrs;
+  };
+
   struct RaxDispatchArgument {
     enum class Kind { Buffer, Constant };
 
@@ -81,10 +92,20 @@ struct ModelManifest {
     uint32_t resourceId = 0;
   };
 
+  struct RaxCollectiveOperand {
+    uint32_t inputBufferId = 0;
+    uint32_t outputBufferId = 0;
+  };
+
   struct RaxOperation {
     rhal::rax::OpKind kind = rhal::rax::OpKind_Invalid;
     uint32_t codeObjectId = 0;
     std::vector<RaxDispatchArgument> arguments;
+    rhal::rax::CollectiveKind collectiveKind =
+        rhal::rax::CollectiveKind_Invalid;
+    rhal::rax::ReductionKind reductionKind = rhal::rax::ReductionKind_Invalid;
+    int32_t root = -1;
+    std::vector<RaxCollectiveOperand> collectiveOperands;
   };
 
   struct RaxFunction {
@@ -134,6 +155,7 @@ struct ModelManifest {
   std::unordered_map<std::string, std::string> resolvedModuleAttrs;
   // All manifest resources, including non-CPU backends such as TTNN
   // flatbuffers.
+  std::vector<RaxBuffer> buffers;
   std::vector<ResolvedCodeObject> codeObjects;
   std::vector<ResolvedConstant> constants;
   std::vector<RaxFunction> functions;
@@ -501,6 +523,32 @@ struct ModelManifest {
       return out;
     };
 
+    // --- Buffers -> owned tensor metadata ---------------------------------
+    if (mod->buffers()) {
+      for (auto buffer : *mod->buffers()) {
+        if (!buffer)
+          continue;
+
+        RaxBuffer rec;
+        rec.id = buffer->id();
+        if (buffer->name())
+          rec.name = buffer->name()->str();
+        rec.memorySpace = buffer->space();
+        rec.attrs = attrsToMap(buffer->attrs());
+        if (const auto *type = buffer->type()) {
+          rec.dtype = type->dtype();
+          rec.layout = type->layout();
+          if (type->shape() && type->shape()->dims())
+            rec.shape.assign(type->shape()->dims()->begin(),
+                             type->shape()->dims()->end());
+          if (type->strides())
+            rec.strides.assign(type->strides()->begin(),
+                               type->strides()->end());
+        }
+        out.buffers.push_back(std::move(rec));
+      }
+    }
+
     // --- Code objects -> generic list + legacy soPath fields ---------------
     if (!mod->code_objects() || mod->code_objects()->size() == 0)
       throw std::runtime_error("ModelManifest: no code_objects in " +
@@ -608,6 +656,26 @@ struct ModelManifest {
                       {hasBuffer ? RaxDispatchArgument::Kind::Buffer
                                  : RaxDispatchArgument::Kind::Constant,
                        hasBuffer ? arg->buffer_id() : arg->constant_id()});
+                }
+              }
+            } else if (operation.kind == rhal::rax::OpKind_Collective) {
+              const auto *collective = op->collective();
+              if (!collective)
+                throw std::runtime_error(
+                    "ModelManifest: malformed Collective in function " +
+                    functionRecord.name);
+              operation.collectiveKind = collective->kind();
+              operation.reductionKind = collective->reduction();
+              operation.root = collective->root();
+              if (collective->operands()) {
+                for (auto operand : *collective->operands()) {
+                  if (!operand)
+                    throw std::runtime_error(
+                        "ModelManifest: null Collective operand in function " +
+                        functionRecord.name);
+                  operation.collectiveOperands.push_back(
+                      {operand->input_buffer_id(),
+                       operand->output_buffer_id()});
                 }
               }
             } else if (operation.kind == rhal::rax::OpKind_Barrier &&

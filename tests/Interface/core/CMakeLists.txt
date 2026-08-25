@@ -56,6 +56,12 @@ target_compile_definitions(buddy-rax-executor-test PRIVATE
 )
 add_dependencies(buddy-rax-executor-test buddy-rax-executor-test-kernels)
 
+_add_test_executable(buddy-rax-collective-executor-test
+  RaxCollectiveExecutorTest.cpp
+  LINK_LIBS
+    buddy_runtime_execution
+)
+
 set(RAX_EXECUTOR_MLIR_E2E_OBJECT
   "${CMAKE_CURRENT_BINARY_DIR}/RaxExecutorMlirE2E.o")
 add_custom_command(

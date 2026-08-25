@@ -16,6 +16,7 @@ set(BUDDY_TEST_DEPENDS
   buddy-audio-container-test
   buddy-text-container-test
   buddy-rax-executor-test
+  buddy-rax-collective-executor-test
   buddy-rax-executor-mlir-e2e-test
   rax-inspect
   rax-pack
