@@ -17,27 +17,10 @@ set(BUDDY_TEST_DEPENDS
   buddy-text-container-test
   buddy-rax-executor-test
   buddy-rax-collective-executor-test
-  buddy-rax-executor-mlir-e2e-test
   rax-inspect
   rax-pack
   mlir-runner
   )
-
-if(BUDDY_RUNTIME_ENABLE_MPI)
-  list(APPEND BUDDY_TEST_DEPENDS
-    buddy-rax-executor-mpi-e2e-test
-    buddy-rax-executor-mpi-e2e-test-kernels
-    buddy-rax-variable-collectives-mpi-e2e-test
-  )
-  if(BUDDY_MLIR_ENABLE_PYTHON_PACKAGES)
-    list(APPEND BUDDY_TEST_DEPENDS
-      buddy-rax-tp-frontend-mpi-e2e-test
-      buddy-rax-tp-frontend-rank0
-      buddy-rax-tp-frontend-rank1
-      buddy-rax-tp-frontend-rax
-    )
-  endif()
-endif()
 
 if(BUDDY_ENABLE_OPENCV)
   list(APPEND BUDDY_TEST_DEPENDS buddy-image-container-test)
