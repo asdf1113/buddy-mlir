@@ -49,70 +49,6 @@ for candidate in openmp_runtime_candidates:
         break
 config.openmp_runtime_dir = openmp_runtime_dir
 config.substitutions.append(("%openmp_runtime_dir", config.openmp_runtime_dir))
-config.substitutions.append(
-    (
-        "%rax_executor_mlir_e2e_rhal",
-        os.path.join(
-            config.buddy_obj_root,
-            "tests",
-            "Interface",
-            "core",
-            "Inputs",
-            "RaxExecutorMlirE2E.rhal.mlir",
-        ),
-    )
-)
-if "mpi" in config.available_features:
-    config.substitutions.append(("%mpiexec", config.mpiexec_executable))
-    config.substitutions.append(("%mpi_numproc_flag", config.mpi_numproc_flag))
-    config.substitutions.append(("%mpi_preflags", config.mpi_preflags))
-    config.substitutions.append(("%mpi_postflags", config.mpi_postflags))
-    config.substitutions.append(
-        (
-            "%rax_executor_mpi_e2e_rank0_rhal",
-            os.path.join(
-                config.buddy_obj_root,
-                "tests",
-                "Interface",
-                "core",
-                "Inputs",
-                "RaxExecutorMpiE2ERank0.rhal.mlir",
-            ),
-        )
-    )
-    config.substitutions.append(
-        (
-            "%rax_executor_mpi_e2e_rank1_rhal",
-            os.path.join(
-                config.buddy_obj_root,
-                "tests",
-                "Interface",
-                "core",
-                "Inputs",
-                "RaxExecutorMpiE2ERank1.rhal.mlir",
-            ),
-        )
-    )
-    stage2e_dir = os.path.join(
-        config.buddy_obj_root, "tests", "Interface", "core", "Stage2E"
-    )
-    for rank in range(2):
-        config.substitutions.append(
-            (
-                f"%rax_tp_frontend_rank{rank}_rax",
-                os.path.join(stage2e_dir, f"rank{rank}.rax"),
-            )
-        )
-        config.substitutions.append(
-            (
-                f"%rax_tp_frontend_rank{rank}_pack",
-                os.path.join(
-                    stage2e_dir,
-                    f"rank{rank}",
-                    f"rank{rank}_params_float32.data",
-                ),
-            )
-        )
 
 llvm_config.with_system_environment(["HOME", "INCLUDE", "LIB", "TMP", "TEMP"])
 
@@ -154,17 +90,10 @@ tools = [
     "buddy-text-container-test",
     "buddy-rax-executor-test",
     "buddy-rax-collective-executor-test",
-    "buddy-rax-executor-mlir-e2e-test",
     "rax-inspect",
     "rax-pack",
     "mlir-runner",
 ]
-
-if "mpi" in config.available_features:
-    tools.append("buddy-rax-executor-mpi-e2e-test")
-    tools.append("buddy-rax-variable-collectives-mpi-e2e-test")
-    if config.buddy_mlir_enable_python_packages:
-        tools.append("buddy-rax-tp-frontend-mpi-e2e-test")
 
 tools.extend(
     [
