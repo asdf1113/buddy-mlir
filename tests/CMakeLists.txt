@@ -27,6 +27,7 @@ if(BUDDY_RUNTIME_ENABLE_MPI)
   list(APPEND BUDDY_TEST_DEPENDS
     buddy-rax-executor-mpi-e2e-test
     buddy-rax-executor-mpi-e2e-test-kernels
+    buddy-rax-variable-collectives-mpi-e2e-test
   )
   if(BUDDY_MLIR_ENABLE_PYTHON_PACKAGES)
     list(APPEND BUDDY_TEST_DEPENDS

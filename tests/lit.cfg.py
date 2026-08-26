@@ -162,6 +162,7 @@ tools = [
 
 if "mpi" in config.available_features:
     tools.append("buddy-rax-executor-mpi-e2e-test")
+    tools.append("buddy-rax-variable-collectives-mpi-e2e-test")
     if config.buddy_mlir_enable_python_packages:
         tools.append("buddy-rax-tp-frontend-mpi-e2e-test")
 

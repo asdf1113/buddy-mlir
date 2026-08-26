@@ -563,34 +563,33 @@ struct ModelManifest {
     }
 
     // --- Code objects -> generic list + legacy soPath fields ---------------
-    if (!mod->code_objects() || mod->code_objects()->size() == 0)
-      throw std::runtime_error("ModelManifest: no code_objects in " +
-                               raxFs.string());
-    for (auto co : *mod->code_objects()) {
-      if (!co)
-        continue;
+    if (mod->code_objects()) {
+      for (auto co : *mod->code_objects()) {
+        if (!co)
+          continue;
 
-      ResolvedCodeObject rec;
-      rec.id = co->id();
-      if (co->name())
-        rec.name = co->name()->str();
-      rec.kind = co->kind();
-      if (co->backend())
-        rec.backend = co->backend()->str();
-      if (co->uri()) {
-        rec.uri = co->uri()->str();
-        rec.path = resolveUri(co->uri(), "code_object.uri");
-      }
-      if (co->entry_symbol())
-        rec.entrySymbol = co->entry_symbol()->str();
-      rec.attrs = attrsToMap(co->attrs());
-      out.codeObjects.push_back(rec);
+        ResolvedCodeObject rec;
+        rec.id = co->id();
+        if (co->name())
+          rec.name = co->name()->str();
+        rec.kind = co->kind();
+        if (co->backend())
+          rec.backend = co->backend()->str();
+        if (co->uri()) {
+          rec.uri = co->uri()->str();
+          rec.path = resolveUri(co->uri(), "code_object.uri");
+        }
+        if (co->entry_symbol())
+          rec.entrySymbol = co->entry_symbol()->str();
+        rec.attrs = attrsToMap(co->attrs());
+        out.codeObjects.push_back(rec);
 
-      if (co->kind() == rhal::rax::CodeObjectKind_HostSharedLib) {
-        if (out.soPath.empty())
-          out.soPath = rec.path;
-        else
-          out.dependentSoPaths.push_back(rec.path);
+        if (co->kind() == rhal::rax::CodeObjectKind_HostSharedLib) {
+          if (out.soPath.empty())
+            out.soPath = rec.path;
+          else
+            out.dependentSoPaths.push_back(rec.path);
+        }
       }
     }
 
