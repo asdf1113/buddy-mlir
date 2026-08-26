@@ -137,6 +137,13 @@ if(BUDDY_RUNTIME_ENABLE_MPI)
     buddy-rax-executor-mpi-e2e-test-kernels
   )
 
+  _add_test_executable(buddy-rax-variable-collectives-mpi-e2e-test
+    RaxVariableCollectivesMpiE2ETest.cpp
+    LINK_LIBS
+      buddy_runtime_execution
+      buddy_runtime_mpi
+  )
+
   if(BUDDY_MLIR_ENABLE_PYTHON_PACKAGES)
     set(STAGE2E_ARTIFACT_DIR "${CMAKE_CURRENT_BINARY_DIR}/Stage2E")
     set(STAGE2E_RANK0_LIBRARY

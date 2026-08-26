@@ -230,9 +230,7 @@ void writeTestRax(const std::string &path) {
                      builder.CreateVector(reduceScatterOutputs), 0,
                      builder.CreateVector(reduceScatterOps), 0);
 
-  const std::vector<flatbuffers::Offset<CodeObject>> codeObjects = {
-      CreateCodeObject(builder, 99, builder.CreateString("unused"),
-                       CodeObjectKind_Unknown, 0, 0, 0, 0, 0)};
+  const std::vector<flatbuffers::Offset<CodeObject>> codeObjects;
   const std::vector<flatbuffers::Offset<Function>> functions = {
       collectivesFunction, allGatherVFunction, reduceScatterFunction};
   auto module = CreateModule(
@@ -249,6 +247,8 @@ void writeTestRax(const std::string &path) {
 }
 
 void checkManifest(const buddy::runtime::ModelManifest &manifest) {
+  if (!manifest.codeObjects.empty())
+    throw std::runtime_error("collective-only manifest has code objects");
   if (manifest.buffers.size() != 6)
     throw std::runtime_error("buffer metadata was not parsed");
   const auto &buffer = manifest.buffers[0];
