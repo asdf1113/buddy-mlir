@@ -21,6 +21,8 @@ from buddy.compiler.graph.operation import (
 )
 from buddy.compiler.graph.source_meta import SourceMeta
 from buddy.compiler.graph.transformer_partition import (
+    CollectiveBoundary,
+    CollectiveKind,
     ComputeSegment,
     FeatureAxis,
     GraphValueRef,
@@ -261,6 +263,268 @@ explicit_text = str(wrapper._imported_module)
 assert "@forward_decode_layer1_seg1(%arg0: memref<8xf32>" in explicit_text
 assert "%arg0[4] [4] [1]" in explicit_text
 assert "weight0" not in driver._wrapper_parameter_bindings[(1, 1)]
+
+
+# Stage 4A resolves every actual instance in graph order. Its dispatch argument
+# order is the packed-parameter ABI order: used typed packs, runtime inputs,
+# then output buffers.
+opt_in_driver = ParallelTemplatePartitionedGraphDriver(
+    graph, partition_plan, parallel_plan, rank=0
+)
+assert opt_in_driver._parallel_segment_wrappers == {}
+assert opt_in_driver._rank_parameter_layout == {}
+runtime_plan = opt_in_driver.build_parallel_runtime_plan()
+assert runtime_plan == opt_in_driver.build_parallel_runtime_plan()
+dispatches = [
+    operation
+    for operation in runtime_plan["operations"]
+    if operation["kind"] == "dispatch"
+]
+assert [dispatch["wrapper"] for dispatch in dispatches] == [
+    "forward_decode_layer0_seg0",
+    "forward_decode_layer0_seg1",
+    "forward_decode_layer1_seg0",
+    "forward_decode_layer1_seg1",
+]
+for dispatch in dispatches:
+    assert dispatch["arguments"] == (
+        dispatch["parameter_packs"] + dispatch["inputs"] + dispatch["outputs"]
+    )
+
+# Segment and actual-instance data flow uses the exact same resolved resource.
+assert dispatches[0]["outputs"][0] == dispatches[1]["inputs"][0]
+assert dispatches[1]["outputs"][0] == dispatches[2]["inputs"][0]
+assert dispatches[2]["outputs"][0] == dispatches[3]["inputs"][0]
+assert runtime_plan["runtime_inputs"] == dispatches[0]["inputs"]
+assert runtime_plan["runtime_outputs"] == dispatches[-1]["outputs"]
+
+# All wrappers use the one rank-global f32 pack, but retain only their concrete
+# parameter binding and its existing dtype-local offset.
+pack_resource = runtime_plan["parameter_packs"][0]["resource"]
+assert {dispatch["parameter_packs"] for dispatch in dispatches} == {
+    (pack_resource,)
+}
+assert dispatches[0]["parameter_bindings"] == (
+    {
+        "name": "weight0",
+        "parameter_index": 0,
+        "pack": pack_resource,
+        "dtype": "float32",
+        "shape": (2, 2),
+        "offset": 0,
+        "numel": 4,
+    },
+)
+assert dispatches[2]["parameter_bindings"] == (
+    {
+        "name": "weight1",
+        "parameter_index": 1,
+        "pack": pack_resource,
+        "dtype": "float32",
+        "shape": (2, 2),
+        "offset": 4,
+        "numel": 4,
+    },
+)
+
+# The two first-segment values do not overlap and reuse one compatible slot.
+# Adjacent values overlap at the consuming dispatch and cannot alias.
+runtime_values = runtime_plan["values"]
+layer0_first_resource = runtime_values["instance0_segment0_result0"]["resource"]
+layer0_second_resource = runtime_values["instance0_segment1_result0"][
+    "resource"
+]
+layer1_first_resource = runtime_values["instance1_segment0_result0"]["resource"]
+assert layer0_first_resource == layer1_first_resource
+assert layer0_first_resource != layer0_second_resource
+
+
+# Runtime-plan outputs preserve OutputOp order by default and use the same
+# explicit post-resolution remap convention as combined template graphs.
+saved_output_args = list(output.args)
+saved_output_indices = list(output._args_index)
+output._arguments = [layer_nodes[1][1].name, layer_nodes[0][1].name]
+output._args_index = [0, 0]
+output_order_driver = ParallelTemplatePartitionedGraphDriver(
+    graph, partition_plan, parallel_plan, rank=0
+)
+semantic_output_plan = output_order_driver.build_parallel_runtime_plan()
+assert semantic_output_plan == output_order_driver.build_parallel_runtime_plan()
+semantic_dispatches = [
+    operation
+    for operation in semantic_output_plan["operations"]
+    if operation["kind"] == "dispatch"
+]
+assert semantic_dispatches[3]["outputs"] == ("output0",)
+assert semantic_dispatches[1]["outputs"] == ("output1",)
+assert semantic_output_plan["runtime_outputs"] == ("output0", "output1")
+
+remapped_output_plan = output_order_driver.build_parallel_runtime_plan(
+    output_remap=[1, 0]
+)
+assert remapped_output_plan == output_order_driver.build_parallel_runtime_plan(
+    output_remap=[1, 0]
+)
+remapped_dispatches = [
+    operation
+    for operation in remapped_output_plan["operations"]
+    if operation["kind"] == "dispatch"
+]
+assert remapped_dispatches[1]["outputs"] == ("output0",)
+assert remapped_dispatches[3]["outputs"] == ("output1",)
+assert remapped_output_plan["runtime_outputs"] == ("output0", "output1")
+
+for invalid_remap, message in (
+    ([0], "output_remap length"),
+    ([0, 2], "invalid output index"),
+):
+    try:
+        output_order_driver.build_parallel_runtime_plan(
+            output_remap=invalid_remap
+        )
+    except ValueError as error:
+        assert message in str(error)
+    else:
+        raise AssertionError(f"expected ValueError containing {message!r}")
+output._arguments = saved_output_args
+output._args_index = saved_output_indices
+
+
+def build_collective_runtime_plan(
+    kind,
+    global_shape,
+    source_shapes,
+    source_layout,
+    target_shapes,
+    target_layout,
+):
+    layouts = []
+    for spec in value_layouts:
+        if spec.value == first_value:
+            layouts.append(
+                ValueLayoutSpec(
+                    spec.value,
+                    global_shape,
+                    source_shapes,
+                    source_layout,
+                )
+            )
+        elif spec.value == second_value:
+            layouts.append(
+                ValueLayoutSpec(
+                    spec.value,
+                    global_shape,
+                    target_shapes,
+                    target_layout,
+                )
+            )
+        else:
+            layouts.append(spec)
+    boundary = CollectiveBoundary(
+        producer=first_value,
+        consumers=(OperandUseRef(second, ("args", 0)),),
+        kind=kind,
+        target_layout=target_layout,
+        target_local_shapes=target_shapes,
+    )
+    collective_template = TemplateParallelPlan(
+        template_id=unit.template_id,
+        parameter_shards=(parameter_shard,),
+        value_layouts=tuple(layouts),
+        op_rewrites=(),
+        collectives=(boundary,),
+        segments=template_plan.segments,
+    )
+    collective_plan = TransformerParallelPlan(
+        graph_name=graph._func_name,
+        world_size=2,
+        templates=(collective_template,),
+    )
+    return ParallelTemplatePartitionedGraphDriver(
+        graph, partition_plan, collective_plan, rank=0
+    ).build_parallel_runtime_plan()
+
+
+# AllReduce is inserted at the consumer ingress and is naturally in-place.
+replicated_shapes = ((2, 4), (2, 4))
+all_reduce_plan = build_collective_runtime_plan(
+    CollectiveKind.ALL_REDUCE,
+    (2, 4),
+    replicated_shapes,
+    TensorLayout(LayoutKind.PARTIAL),
+    replicated_shapes,
+    TensorLayout(LayoutKind.REPLICATED),
+)
+first_three = all_reduce_plan["operations"][:3]
+assert [operation["kind"] for operation in first_three] == [
+    "dispatch",
+    "collective",
+    "dispatch",
+]
+all_reduce = first_three[1]
+assert all_reduce["collective"] == "all_reduce"
+assert all_reduce["reduction"] == "sum"
+assert all_reduce["input"] == first_three[0]["outputs"][0]
+assert all_reduce["input"] == all_reduce["output"]
+assert all_reduce["output"] == first_three[2]["inputs"][0]
+
+# AllGatherV derives flattened receive counts and prefix-sum displacements from
+# every source rank-local shape. Its result is a distinct resource.
+unequal_source_shapes = ((3, 4), (1, 4))
+gather_target_shapes = ((4, 4), (4, 4))
+all_gather_plan = build_collective_runtime_plan(
+    CollectiveKind.ALL_GATHERV,
+    (4, 4),
+    unequal_source_shapes,
+    TensorLayout(LayoutKind.SHARDED, 0),
+    gather_target_shapes,
+    TensorLayout(LayoutKind.REPLICATED),
+)
+all_gather_ops = all_gather_plan["operations"][:3]
+all_gather = all_gather_ops[1]
+assert all_gather["collective"] == "all_gatherv"
+assert all_gather["recv_counts"] == (12, 4)
+assert all_gather["displacements"] == (0, 12)
+assert all_gather["input"] == all_gather_ops[0]["outputs"][0]
+assert all_gather["input"] != all_gather["output"]
+assert all_gather["output"] == all_gather_ops[2]["inputs"][0]
+
+# ReduceScatter derives its flattened counts from target_local_shapes and is
+# likewise out-of-place with sum reduction.
+scatter_source_shapes = ((4, 4), (4, 4))
+scatter_target_shapes = ((3, 4), (1, 4))
+reduce_scatter_plan = build_collective_runtime_plan(
+    CollectiveKind.REDUCE_SCATTER,
+    (4, 4),
+    scatter_source_shapes,
+    TensorLayout(LayoutKind.PARTIAL),
+    scatter_target_shapes,
+    TensorLayout(LayoutKind.SHARDED, 0),
+)
+reduce_scatter_ops = reduce_scatter_plan["operations"][:3]
+reduce_scatter = reduce_scatter_ops[1]
+assert reduce_scatter["collective"] == "reduce_scatter"
+assert reduce_scatter["recv_counts"] == (12, 4)
+assert reduce_scatter["reduction"] == "sum"
+assert reduce_scatter["input"] == reduce_scatter_ops[0]["outputs"][0]
+assert reduce_scatter["input"] != reduce_scatter["output"]
+assert reduce_scatter["output"] == reduce_scatter_ops[2]["inputs"][0]
+
+# A row-major axis-1 shard with multiple outer blocks cannot be represented by
+# one direct flat rank block in the current RAX collective ABI.
+try:
+    build_collective_runtime_plan(
+        CollectiveKind.ALL_GATHERV,
+        (2, 4),
+        ((2, 3), (2, 1)),
+        TensorLayout(LayoutKind.SHARDED, 1),
+        ((2, 4), (2, 4)),
+        TensorLayout(LayoutKind.REPLICATED),
+    )
+except ValueError as error:
+    assert "current flat RAX collective cannot represent" in str(error)
+else:
+    raise AssertionError("expected unsupported flat shard layout rejection")
 
 
 # Rank-global packs follow the Stage 3A offsets, shard on the planned storage
