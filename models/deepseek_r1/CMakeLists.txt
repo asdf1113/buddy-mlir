@@ -53,7 +53,7 @@ endif()
 
 execute_process(
   COMMAND "${Python3_EXECUTABLE}" -c
-          "import json,sys; s=json.load(open(sys.argv[1])); raw=s.get('tiered_kv_cache', False); enabled=False; sizes=[]\nif isinstance(raw, dict):\n  enabled=bool(raw.get('enabled', True)); sizes=raw.get('cache_sizes', s.get('cache_sizes', []))\nelse:\n  enabled=bool(raw); sizes=s.get('cache_sizes', [])\nif isinstance(sizes, str): sizes=[x.strip() for x in sizes.split(',') if x.strip()]\nif enabled and not sizes: sizes=[32,64,128,256,512,1024]\nprint(('ON' if enabled else 'OFF') + '|' + ','.join(str(x) for x in sizes))"
+          "import json,sys; s=json.load(open(sys.argv[1])); raw=s.get('tiered_kv_cache', False); enabled=False; sizes=[]\nif isinstance(raw, dict):\n  enabled=bool(raw.get('enabled', True)); sizes=raw.get('cache_sizes', s.get('cache_sizes', []))\nelse:\n  enabled=bool(raw); sizes=s.get('cache_sizes', [])\nif isinstance(sizes, str): sizes=[x.strip() for x in sizes.split(',') if x.strip()]\nif enabled and not sizes: sizes=[32,64,128,256,512,1024]\nprint(('ON' if enabled else 'OFF') + '|' + ','.join(str(x) for x in sizes) + '|' + s['variant'])"
           "${BUDDY_DSR1_SPEC}"
   OUTPUT_VARIABLE _BUDDY_DSR1_TIERED_FROM_SPEC
   OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -71,6 +71,15 @@ if(_BUDDY_DSR1_TIERED_PARSE_RESULT EQUAL 0)
     string(REPLACE "," ";" _BUDDY_DSR1_TIERED_SIZES_FROM_SPEC
            "${_BUDDY_DSR1_TIERED_SIZES_CSV}")
   endif()
+  list(GET _BUDDY_DSR1_TIERED_FIELDS 2 _BUDDY_DSR1_VARIANT_FROM_SPEC)
+endif()
+
+if(_BUDDY_DSR1_VARIANT_FROM_SPEC STREQUAL "f32")
+  set(_BUDDY_DSR1_PARAMETER_PACK_DTYPE "float32")
+elseif(_BUDDY_DSR1_VARIANT_FROM_SPEC STREQUAL "f16")
+  set(_BUDDY_DSR1_PARAMETER_PACK_DTYPE "float16")
+elseif(_BUDDY_DSR1_VARIANT_FROM_SPEC STREQUAL "bf16")
+  set(_BUDDY_DSR1_PARAMETER_PACK_DTYPE "bfloat16")
 endif()
 
 if(BUDDY_DSR1_TIERED_KV_CACHE STREQUAL "")
@@ -96,6 +105,7 @@ buddy_add_model(
   BUILD_DIR "${DEEPSEEKR1_BUILD_DIR}"
   MLIR_DIR "${DEEPSEEKR1_MLIR_DIR}"
   COMPILE_JOBS "${BUDDY_DSR1_COMPILE_JOBS}"
+  PARAMETER_PACK_DTYPE "${_BUDDY_DSR1_PARAMETER_PACK_DTYPE}"
   TIERED_KV_CACHE "${_BUDDY_DSR1_TIERED_ENABLED}"
   TIERED_CACHE_SIZES "${_BUDDY_DSR1_TIERED_CACHE_SIZES}"
 )
