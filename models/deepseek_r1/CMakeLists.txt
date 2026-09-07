@@ -116,6 +116,22 @@ target_sources(buddy_models_deepseek_r1 PRIVATE
 target_link_libraries(buddy_models_deepseek_r1 PUBLIC
   buddy_runtime_execution
 )
+if(BUDDY_RUNTIME_ENABLE_MPI)
+  target_sources(buddy_models_deepseek_r1 PRIVATE
+    DeepSeekR1RaxRunner.cpp
+  )
+  target_link_libraries(buddy_models_deepseek_r1 PUBLIC
+    buddy_runtime_mpi
+  )
+  target_compile_definitions(buddy_models_deepseek_r1 PRIVATE
+    BUDDY_RUNTIME_ENABLE_MPI
+  )
+  install(FILES
+    include/buddy/runtime/models/DeepSeekR1RaxRunner.h
+    DESTINATION include/buddy-mlir/buddy/runtime/models
+    COMPONENT buddy_runtime
+  )
+endif()
 install(FILES
   include/buddy/runtime/models/DeepSeekR1RaxSession.h
   DESTINATION include/buddy-mlir/buddy/runtime/models
