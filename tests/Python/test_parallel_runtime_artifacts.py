@@ -246,6 +246,22 @@ for rank in range(2):
             }
             for operation in runtime_plan["operations"]
         ]
+        phase_dir = partition_dir / f"rank{rank}" / function_name
+        for operation in runtime_plan["operations"]:
+            if operation["kind"] != "dispatch":
+                continue
+            wrapper_text = (
+                phase_dir / f"{operation['wrapper']}.mlir"
+            ).read_text()
+            signature = re.search(
+                rf"func\.func @{operation['wrapper']}\((.*?)\) ->",
+                wrapper_text,
+                re.DOTALL,
+            )
+            assert signature is not None
+            assert len(re.findall(r"%arg\d+:", signature.group(1))) == len(
+                operation["parameter_packs"] + operation["inputs"]
+            )
 
 # Re-emission from the same frontend objects is byte-for-byte deterministic.
 import_model.export_template_partitioned_mlir(
