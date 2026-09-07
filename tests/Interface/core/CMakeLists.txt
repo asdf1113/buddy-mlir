@@ -56,6 +56,52 @@ target_compile_definitions(buddy-rax-executor-test PRIVATE
 )
 add_dependencies(buddy-rax-executor-test buddy-rax-executor-test-kernels)
 
+set(RAX_WRAPPER_ABI_TEST_OBJECT
+  "${CMAKE_CURRENT_BINARY_DIR}/RaxWrapperAbiTest.o")
+add_custom_command(
+  OUTPUT "${RAX_WRAPPER_ABI_TEST_OBJECT}"
+  COMMAND "${Python3_EXECUTABLE}"
+          "${CMAKE_SOURCE_DIR}/tools/buddy-codegen/compile_pipeline.py"
+          --config
+          "${CMAKE_CURRENT_SOURCE_DIR}/Inputs/RaxWrapperAbiTestConfig.json"
+          --input
+          "${CMAKE_CURRENT_SOURCE_DIR}/Inputs/RaxWrapperAbiTest.mlir"
+          --output "${RAX_WRAPPER_ABI_TEST_OBJECT}"
+          --pipeline forward
+          --tp-wrapper-out-params
+          --buddy-opt "$<TARGET_FILE:buddy-opt>"
+          --llvm-tools-dir "${LLVM_TOOLS_BINARY_DIR}"
+          --llc-attrs=-mcpu=native
+  DEPENDS
+    buddy-opt
+    "${CMAKE_SOURCE_DIR}/tools/buddy-codegen/compile_pipeline.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Inputs/RaxWrapperAbiTestConfig.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Inputs/RaxWrapperAbiTest.mlir"
+  COMMENT "Building focused DeepSeek TP wrapper ABI object"
+  VERBATIM
+)
+set_source_files_properties("${RAX_WRAPPER_ABI_TEST_OBJECT}" PROPERTIES
+  EXTERNAL_OBJECT TRUE
+  GENERATED TRUE
+)
+
+add_library(buddy-rax-wrapper-abi-test-kernels SHARED
+  Inputs/RaxWrapperAbiTestShim.cpp
+  "${RAX_WRAPPER_ABI_TEST_OBJECT}"
+)
+
+_add_test_executable(buddy-rax-wrapper-abi-test
+  RaxWrapperAbiTest.cpp
+  LINK_LIBS
+    buddy_runtime_execution
+)
+target_compile_definitions(buddy-rax-wrapper-abi-test PRIVATE
+  RAX_WRAPPER_ABI_TEST_LIBRARY="$<TARGET_FILE:buddy-rax-wrapper-abi-test-kernels>"
+)
+add_dependencies(buddy-rax-wrapper-abi-test
+  buddy-rax-wrapper-abi-test-kernels
+)
+
 _add_test_executable(buddy-rax-collective-executor-test
   RaxCollectiveExecutorTest.cpp
   LINK_LIBS

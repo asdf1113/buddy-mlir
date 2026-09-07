@@ -80,6 +80,7 @@ def build_stages(
     variant: str = "f32",
     tiered: bool = False,
     decode_pack: dict | None = None,
+    tp_wrapper_out_params: bool = False,
 ):
     """
     Build the list of (tool_name, [args]) stages for a given pipeline type.
@@ -98,10 +99,20 @@ def build_stages(
         llc_base_args.append("-code-model=large")
 
     if pipeline_type == "forward":
+        out_param_opts = []
+        if tp_wrapper_out_params:
+            out_param_opts = [
+                "-buffer-results-to-out-params=hoist-static-allocs",
+                (
+                    "-buffer-results-to-out-params="
+                    "hoist-static-allocs modify-public-functions"
+                ),
+            ]
         stages.append(
             (
                 "buddy-opt",
-                [
+                out_param_opts
+                + [
                     "-expand-strided-metadata",
                     "-canonicalize",
                     "-cse",
@@ -824,6 +835,14 @@ def main():
         help="Pipeline type (single-file mode)",
     )
     parser.add_argument(
+        "--tp-wrapper-out-params",
+        action="store_true",
+        help=(
+            "Convert private TP subgraph and public wrapper memref results "
+            "to caller-provided output arguments (single-file forward mode)"
+        ),
+    )
+    parser.add_argument(
         "--mlir-dir", help="Directory with MLIR files (compile-all)"
     )
     parser.add_argument(
@@ -879,6 +898,15 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.tp_wrapper_out_params and (
+        args.compile_all
+        or args.compile_partitioned
+        or args.pipeline != "forward"
+    ):
+        parser.error(
+            "--tp-wrapper-out-params requires single-file --pipeline forward"
+        )
 
     with open(args.config) as f:
         config = json.load(f)
@@ -958,6 +986,7 @@ def main():
             variant,
             is_tiered_kv_cache(config),
             config.get("decode_pack"),
+            args.tp_wrapper_out_params,
         )
 
         print(

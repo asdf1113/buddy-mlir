@@ -1,0 +1,6 @@
+{
+  "variant": "f32",
+  "compilation": {
+    "num_threads": 1
+  }
+}
