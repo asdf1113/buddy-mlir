@@ -34,6 +34,10 @@
 #include "buddy/runtime/llm/TextGeneration.h"
 #include "buddy/runtime/models/ModelSession.h"
 
+#ifdef BUDDY_RUNTIME_ENABLE_MPI
+#include "buddy/runtime/models/DeepSeekR1RaxRunner.h"
+#endif
+
 #include "buddy/Core/Container.h"
 
 using buddy::Text;
@@ -58,6 +62,20 @@ static constexpr int kEotToken = 151647; // <|EOT|>
 
 void DeepSeekR1Runner::run(const RunConfig &cfgIn) {
   RunConfig cfg = cfgIn;
+
+  if (cfg.tensorParallelSize > 1) {
+    if (cfg.raxPath.empty())
+      throw std::runtime_error(
+          "DeepSeek tensor-parallel execution requires --model <rank0.rax>");
+#ifdef BUDDY_RUNTIME_ENABLE_MPI
+    runDeepSeekR1Rax(cfg.raxPath, cfg.tensorParallelSize);
+    return;
+#else
+    throw std::runtime_error(
+        "DeepSeek tensor-parallel execution requires a build configured with "
+        "BUDDY_RUNTIME_ENABLE_MPI=ON");
+#endif
+  }
 
   const bool suppress = cfg.suppressStats || cfg.streamJsonl;
 

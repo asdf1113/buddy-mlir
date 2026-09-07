@@ -24,6 +24,15 @@ set(BUDDY_TEST_DEPENDS
   mlir-runner
   )
 
+if(BUDDY_RUNTIME_ENABLE_MPI)
+  list(APPEND BUDDY_TEST_DEPENDS
+    buddy-deepseek-r1-rax-runner-test
+  )
+  if(BUDDY_BUILD_DEEPSEEK_R1_MODEL)
+    list(APPEND BUDDY_TEST_DEPENDS buddy-cli)
+  endif()
+endif()
+
 if(BUDDY_ENABLE_OPENCV)
   list(APPEND BUDDY_TEST_DEPENDS buddy-image-container-test)
 endif()

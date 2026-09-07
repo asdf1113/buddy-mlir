@@ -287,6 +287,9 @@ static void usage(const char *prog) {
          "1024)\n"
       << "  --batch-size <N>         Batch size override for fixed-batch "
          "packages\n"
+      << "  --tensor-parallel-size <N>\n"
+      << "                           Execute rank-local DeepSeek RAX artifacts "
+         "with MPI\n"
       << "\n"
       << "Sampling:\n"
       << "  --temperature <float>    Sampling temperature (0.0 = greedy, "
@@ -356,6 +359,7 @@ int main(int argc, char **argv) {
   std::string imagePath;
   int maxTokens = 4096;
   int batchSize = 0;
+  int tensorParallelSize = 1;
 
   // Sampling args
   float temperature = 0.0f;
@@ -406,6 +410,8 @@ int main(int argc, char **argv) {
       maxTokens = std::stoi(argv[++i]);
     else if (a == "--batch-size" && i + 1 < argc)
       batchSize = std::stoi(argv[++i]);
+    else if (a == "--tensor-parallel-size" && i + 1 < argc)
+      tensorParallelSize = std::stoi(argv[++i]);
     else if (a == "--temperature" && i + 1 < argc)
       temperature = std::stof(argv[++i]);
     else if (a == "--top-k" && i + 1 < argc)
@@ -477,6 +483,16 @@ int main(int argc, char **argv) {
                  "combine it with --defer-decode-token-readback.\n";
     return 2;
   }
+  if (tensorParallelSize < 1) {
+    std::cerr << "\033[31;1m[Error]\033[0m "
+                 "--tensor-parallel-size must be positive.\n";
+    return 2;
+  }
+  if (tensorParallelSize > 1 && raxPath.empty()) {
+    std::cerr << "\033[31;1m[Error]\033[0m "
+                 "--tensor-parallel-size requires --model <rank0.rax>.\n";
+    return 2;
+  }
 
   std::vector<std::string> prompts;
   if (!promptFile.empty()) {
@@ -501,7 +517,7 @@ int main(int argc, char **argv) {
 
   // Speech and vision-language runs are driven by media inputs.
   if (prompt.empty() && prompts.empty() && audioPath.empty() &&
-      imagePath.empty() && !interactive) {
+      imagePath.empty() && !interactive && tensorParallelSize == 1) {
     std::cout << "Prompt: ";
     std::getline(std::cin, prompt);
     std::cout << "\n";
@@ -529,6 +545,12 @@ int main(int argc, char **argv) {
   } else {
     modelName = "legacy";
   }
+  if (tensorParallelSize > 1 && modelName.rfind("deepseek_r1", 0) != 0) {
+    std::cerr << "\033[31;1m[Error]\033[0m "
+                 "--tensor-parallel-size is currently supported only for "
+                 "DeepSeek RAX artifacts.\n";
+    return 2;
+  }
   if (runnerSoPath.empty())
     runnerSoPath = manifestRunnerSoPath;
   runnerSoPath = resolvePathRelativeToRax(runnerSoPath, raxPath);
@@ -546,6 +568,7 @@ int main(int argc, char **argv) {
   cfg.imagePath = imagePath;
   cfg.maxNewTokens = maxTokens;
   cfg.batchSize = batchSize;
+  cfg.tensorParallelSize = tensorParallelSize;
   cfg.samplerConfig.temperature = temperature;
   cfg.samplerConfig.topK = topK;
   cfg.samplerConfig.topP = topP;
