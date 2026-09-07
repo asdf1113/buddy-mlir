@@ -235,6 +235,44 @@ struct DeepSeekR1RaxSession::Impl {
     return nullptr;
   }
 
+  const ModelManifest::RaxBuffer &bufferMetadata(uint32_t id) const {
+    for (const auto &candidate : execution.manifest().buffers)
+      if (candidate.id == id)
+        return candidate;
+    throw std::runtime_error("DeepSeekR1RaxSession: missing buffer metadata");
+  }
+
+  void initializeGenerationContract() {
+    if (generationContractInitialized)
+      return;
+    const auto *prefill = function("forward_prefill");
+    const auto *decode = function("forward_decode");
+    if (!prefill || prefill->inputs.size() != 1 || prefill->outputs.empty() ||
+        !decode || decode->inputs.size() < 2 || decode->outputs.empty())
+      throw std::runtime_error(
+          "DeepSeekR1RaxSession: unsupported DeepSeek forward signatures");
+
+    prefillInput = prefill->inputs.front();
+    decodeTokenInput = decode->inputs.front();
+    prefillLogits = prefill->outputs.back();
+    decodeLogits = decode->outputs.back();
+
+    const auto &prefillInputMetadata = bufferMetadata(prefillInput);
+    const auto &prefillLogitsMetadata = bufferMetadata(prefillLogits);
+    const auto &decodeLogitsMetadata = bufferMetadata(decodeLogits);
+    if (prefillInputMetadata.dtype != rhal::rax::DType_I64 ||
+        prefillLogitsMetadata.dtype != rhal::rax::DType_F32 ||
+        decodeLogitsMetadata.dtype != rhal::rax::DType_F32 ||
+        prefillLogitsMetadata.shape.empty() ||
+        decodeLogitsMetadata.shape.empty() ||
+        prefillLogitsMetadata.shape.back() <= 0 ||
+        prefillLogitsMetadata.shape.back() != decodeLogitsMetadata.shape.back())
+      throw std::runtime_error(
+          "DeepSeekR1RaxSession: incompatible token or logits metadata");
+    generationVocabSize = static_cast<int>(prefillLogitsMetadata.shape.back());
+    generationContractInitialized = true;
+  }
+
   void copyBuffer(uint32_t sourceId, uint32_t destinationId) {
     const MappedRegion &source = buffer(sourceId);
     MappedRegion &destination = buffer(destinationId);
@@ -302,6 +340,14 @@ struct DeepSeekR1RaxSession::Impl {
   std::unordered_map<uint32_t, std::unique_ptr<MappedRegion>> constants;
   std::unordered_map<std::string, uint32_t> bufferNames;
   std::unordered_map<std::string, uint32_t> constantNames;
+  uint32_t prefillInput = 0;
+  uint32_t decodeTokenInput = 0;
+  uint32_t prefillLogits = 0;
+  uint32_t decodeLogits = 0;
+  int generationVocabSize = 0;
+  int position = 0;
+  bool lastLogitsAreDecode = false;
+  bool generationContractInitialized = false;
 };
 
 DeepSeekR1RaxSession::DeepSeekR1RaxSession(const std::string &raxPath)
@@ -354,6 +400,77 @@ void DeepSeekR1RaxSession::forwardPrefill() {
 void DeepSeekR1RaxSession::forwardDecode() {
   impl_->execution.execute("forward_decode");
   impl_->copyDecodeKVCacheToInputs();
+}
+
+void DeepSeekR1RaxSession::loadWeights(
+    const std::vector<std::string> &weightPaths) {
+  (void)weightPaths;
+  // External constants are resolved and mapped when the RAX session is built.
+}
+
+void DeepSeekR1RaxSession::prefill(Text<size_t, 2> &tokens) {
+  impl_->initializeGenerationContract();
+  const size_t inputBytes = bufferSize(impl_->prefillInput);
+  if (sizeof(size_t) != sizeof(int64_t) ||
+      tokens.getSize() * sizeof(size_t) != inputBytes)
+    throw std::runtime_error(
+        "DeepSeekR1RaxSession: token input does not match RAX metadata");
+  bindRuntimeInput(impl_->prefillInput, tokens.getData(), inputBytes);
+  forwardPrefill();
+  impl_->position = static_cast<int>(tokens.getTokenCnt());
+  impl_->lastLogitsAreDecode = false;
+}
+
+void DeepSeekR1RaxSession::decode(int tokenId) {
+  impl_->initializeGenerationContract();
+  const auto *decodeFunction = impl_->function("forward_decode");
+  const int64_t token = tokenId;
+  const int64_t position = impl_->position;
+  bindRuntimeInput(impl_->decodeTokenInput, &token, sizeof(token));
+  for (size_t index = 1; index < decodeFunction->inputs.size(); ++index) {
+    const uint32_t input = decodeFunction->inputs[index];
+    const auto &metadata = impl_->bufferMetadata(input);
+    if (metadata.dtype == rhal::rax::DType_I64 &&
+        bufferSize(input) == sizeof(position))
+      bindRuntimeInput(input, &position, sizeof(position));
+  }
+  forwardDecode();
+  ++impl_->position;
+  impl_->lastLogitsAreDecode = true;
+}
+
+void DeepSeekR1RaxSession::resetPosition() {
+  impl_->position = 0;
+  impl_->lastLogitsAreDecode = false;
+}
+
+int DeepSeekR1RaxSession::position() const { return impl_->position; }
+
+const float *DeepSeekR1RaxSession::logitsData(int tokenOffset) const {
+  impl_->initializeGenerationContract();
+  const uint32_t logits =
+      impl_->lastLogitsAreDecode ? impl_->decodeLogits : impl_->prefillLogits;
+  if (tokenOffset < 0)
+    throw std::runtime_error("DeepSeekR1RaxSession: negative logits offset");
+  const size_t offset = static_cast<size_t>(tokenOffset) * vocabSize();
+  if ((offset + static_cast<size_t>(vocabSize())) * sizeof(float) >
+      bufferSize(logits))
+    throw std::runtime_error(
+        "DeepSeekR1RaxSession: logits offset out of range");
+  return static_cast<const float *>(impl_->buffer(logits).data) + offset;
+}
+
+int DeepSeekR1RaxSession::vocabSize() const {
+  impl_->initializeGenerationContract();
+  return impl_->generationVocabSize;
+}
+
+bool DeepSeekR1RaxSession::handleKVCacheOverflow(int keepTokenNum,
+                                                 float ropeTheta) {
+  (void)keepTokenNum;
+  (void)ropeTheta;
+  throw std::runtime_error(
+      "DeepSeekR1RaxSession: KV cache overflow is not supported");
 }
 
 void *DeepSeekR1RaxSession::bufferData(uint32_t id) {

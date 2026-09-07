@@ -9,15 +9,22 @@
 #ifndef BUDDY_RUNTIME_MODELS_DEEPSEEKR1RAXRUNNER_H
 #define BUDDY_RUNTIME_MODELS_DEEPSEEKR1RAXRUNNER_H
 
+#include <functional>
 #include <string>
 
 namespace buddy {
 namespace runtime {
 
-/// Execute one prefill and one decode step from rank-local DeepSeek RAX files.
+class DeepSeekR1RaxSession;
+
+using DeepSeekR1RaxSessionCallback =
+    std::function<void(DeepSeekR1RaxSession &, int rank)>;
+
+/// Run a callback while the rank-local RAX session and MPI world are alive.
 /// The input path locates the artifact directory; each process opens
 /// rank<mpi-rank>.rax from that directory.
-void runDeepSeekR1Rax(const std::string &raxPath, int tensorParallelSize);
+void runDeepSeekR1Rax(const std::string &raxPath, int tensorParallelSize,
+                      const DeepSeekR1RaxSessionCallback &callback);
 
 } // namespace runtime
 } // namespace buddy

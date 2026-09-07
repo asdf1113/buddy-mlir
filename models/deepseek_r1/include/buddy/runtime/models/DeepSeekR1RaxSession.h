@@ -11,6 +11,7 @@
 
 #include "buddy/runtime/communication/Communicator.h"
 #include "buddy/runtime/core/ModelManifest.h"
+#include "buddy/runtime/llm/LLMSession.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -26,11 +27,11 @@ namespace runtime {
 /// manifest. Rank-local buffers are allocated from their manifest shapes and
 /// remain valid for the session lifetime. This class does not implement text
 /// generation policy, tokenization, or sampling.
-class DeepSeekR1RaxSession {
+class DeepSeekR1RaxSession : public LLMSession {
 public:
   explicit DeepSeekR1RaxSession(const std::string &raxPath);
   DeepSeekR1RaxSession(const std::string &raxPath, Communicator &communicator);
-  ~DeepSeekR1RaxSession();
+  ~DeepSeekR1RaxSession() override;
 
   DeepSeekR1RaxSession(const DeepSeekR1RaxSession &) = delete;
   DeepSeekR1RaxSession &operator=(const DeepSeekR1RaxSession &) = delete;
@@ -51,6 +52,16 @@ public:
 
   void forwardPrefill();
   void forwardDecode();
+
+  void loadWeights(const std::vector<std::string> &weightPaths) override;
+  void prefill(Text<size_t, 2> &tokens) override;
+  void decode(int tokenId) override;
+  void resetPosition() override;
+  int position() const override;
+  const float *logitsData(int tokenOffset = 0) const override;
+  int vocabSize() const override;
+  bool handleKVCacheOverflow(int keepTokenNum,
+                             float ropeTheta = 10000.0f) override;
 
   void *bufferData(uint32_t id);
   void *bufferData(const std::string &name);
