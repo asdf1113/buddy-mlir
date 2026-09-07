@@ -2647,10 +2647,31 @@ class _TemplateParallelPlanner:
             rank_output = list(output_shape)
             rank_output[axis] = update.local_shapes[rank][axis]
             local_values.append(tuple(rank_output))
+        local_shapes = tuple(local_values)
+        layout = TensorLayout(LayoutKind.SHARDED, axis)
+        if target.global_shape != output_shape:
+            raise ParallelPlanError(
+                f"IndexPut {op.name!r} output shape does not match its cache"
+            )
+        if target.layout.kind is LayoutKind.REPLICATED:
+            region_inputs = {
+                input_ref.value
+                for input_ref in self.region.interface.ordered_inputs
+            }
+            if target.value not in region_inputs:
+                raise ParallelPlanError(
+                    f"IndexPut {op.name!r} cannot shard an internal replicated cache"
+                )
+            self.local_shapes[target.value] = local_shapes
+            self.layouts[target.value] = layout
+        elif target.layout != layout or target.local_shapes != local_shapes:
+            raise ParallelPlanError(
+                f"IndexPut {op.name!r} cache and update layouts do not match"
+            )
         self._record_result(
             output,
-            tuple(local_values),
-            TensorLayout(LayoutKind.SHARDED, axis),
+            local_shapes,
+            layout,
         )
 
     def _infer_passthrough(self, op: Op, uses: list[_ResolvedUse]) -> None:

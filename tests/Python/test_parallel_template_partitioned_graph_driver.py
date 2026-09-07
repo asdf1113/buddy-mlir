@@ -10,14 +10,20 @@ from buddy.compiler.graph import (
     NodeType,
     ParallelTemplatePartitionedGraphDriver,
     TensorDType,
+    TransformerParallelConfig,
+    build_transformer_parallel_plan,
     build_transformer_partition_plan,
 )
 from buddy.compiler.graph.graph import GraphImporter
 from buddy.compiler.graph.operation import (
+    AddMMOp,
     AddOp,
     CallOp,
+    FuncOp,
+    IndexPutOp,
     OutputOp,
     PlaceholderOp,
+    ReshapeOp,
 )
 from buddy.compiler.graph.source_meta import SourceMeta
 from buddy.compiler.graph.transformer_partition import (
@@ -36,7 +42,7 @@ from buddy.compiler.graph.transformer_partition import (
     TransformerParallelPlan,
     ValueLayoutSpec,
 )
-from buddy.compiler.ops import func, tosa
+from buddy.compiler.ops import func, linalg, tosa
 from buddy_mlir import ir
 
 
@@ -63,6 +69,164 @@ def bind(parent, child):
     parent.add_children(child.name)
     child.add_parent(parent.name)
     child.add_argument(parent.name)
+
+
+def connect(parent, child):
+    parent.add_children(child.name)
+    child.add_parent(parent.name)
+
+
+# A decode KV cache keeps its global head extent in graph metadata, while the
+# TP rank-local storage follows the already-planned sharded update. The same
+# local shape must reach the segment input, wrapper declaration, and imported
+# subgraph argument/result types.
+cache_graph = Graph(
+    {**tosa.ops_registry, **linalg.ops_registry, **func.ops_registry},
+    "forward_decode_cache",
+)
+cache_activation = add(
+    cache_graph,
+    node(PlaceholderOp, "cache_activation", (1, 4)),
+    NodeType.InputNode,
+)
+cache_input = add(
+    cache_graph,
+    node(PlaceholderOp, "cache_input", (1, 2, 4, 1)),
+    NodeType.InputNode,
+)
+cache_position = add(
+    cache_graph,
+    node(PlaceholderOp, "cache_position", (1,)),
+    NodeType.InputNode,
+)
+cache_position.tensor_meta["dtype"] = TensorDType.Int64
+cache_bias = add(
+    cache_graph,
+    node(PlaceholderOp, "cache_bias", (2,)),
+    NodeType.FakeNode,
+)
+cache_weight = add(
+    cache_graph,
+    node(PlaceholderOp, "cache_weight", (4, 2)),
+    NodeType.FakeNode,
+)
+cache_projection = add(
+    cache_graph,
+    node(
+        AddMMOp,
+        "cache_projection",
+        (1, 2),
+        "model.layers.0.self_attn.k_proj",
+    ),
+)
+for operand in (cache_bias, cache_activation, cache_weight):
+    bind(operand, cache_projection)
+cache_update = add(
+    cache_graph,
+    node(
+        ReshapeOp,
+        "cache_update",
+        (1, 2, 1, 1),
+        "model.layers.0.self_attn.k_proj",
+    ),
+)
+bind(cache_projection, cache_update)
+cache_update.add_argument((1, 2, 1, 1))
+cache_update._newshape = (1, 2, 1, 1)
+cache_store = add(
+    cache_graph,
+    node(
+        IndexPutOp,
+        "cache_store",
+        (1, 2, 4, 1),
+        "model.layers.0.self_attn.k_proj",
+    ),
+)
+for operand in (cache_input, cache_position, cache_update):
+    connect(operand, cache_store)
+cache_store.add_argument(cache_input.name)
+cache_store.add_argument([None, None, cache_position.name, None])
+cache_store.add_argument(cache_update.name)
+cache_store.add_argument(False)
+cache_output = add(cache_graph, node(OutputOp, "cache_output", ()))
+bind(cache_store, cache_output)
+
+cache_partition_plan = build_transformer_partition_plan(cache_graph)
+cache_parallel_plan = build_transformer_parallel_plan(
+    cache_graph,
+    cache_partition_plan,
+    TransformerParallelConfig(tp_size=2),
+)
+cache_template = cache_parallel_plan.templates[0]
+cache_layouts = {spec.value: spec for spec in cache_template.value_layouts}
+cache_input_value = GraphValueRef(cache_input)
+cache_update_value = GraphValueRef(cache_update)
+cache_store_value = GraphValueRef(cache_store)
+expected_cache_shapes = ((1, 1, 4, 1), (1, 1, 4, 1))
+
+
+def tensor_shape(meta):
+    return tuple(meta.shape if hasattr(meta, "shape") else meta["shape"])
+
+
+assert cache_layouts[cache_input_value].global_shape == (1, 2, 4, 1)
+assert cache_layouts[cache_input_value].local_shapes == expected_cache_shapes
+assert cache_layouts[cache_input_value].layout == TensorLayout(
+    LayoutKind.SHARDED, 1
+)
+assert cache_layouts[cache_update_value].local_shapes == (
+    (1, 1, 1, 1),
+    (1, 1, 1, 1),
+)
+assert cache_layouts[cache_update_value].layout == TensorLayout(
+    LayoutKind.SHARDED, 1
+)
+assert cache_layouts[cache_store_value].local_shapes == expected_cache_shapes
+assert cache_layouts[cache_store_value].layout == TensorLayout(
+    LayoutKind.SHARDED, 1
+)
+
+cache_segment = cache_template.segments[0]
+cache_slot = cache_segment.ordered_inputs.index(cache_input_value)
+assert cache_store_value in cache_segment.ordered_outputs
+for rank in range(2):
+    cache_driver = ParallelTemplatePartitionedGraphDriver(
+        cache_graph, cache_partition_plan, cache_parallel_plan, rank
+    )
+    cache_subgraph = cache_driver.build_parallel_template_subgraphs()[0]
+    assert tensor_shape(cache_subgraph.inputs[cache_slot].tensor_meta) == (
+        1,
+        1,
+        4,
+        1,
+    )
+    cache_wrapper = cache_driver.construct_parallel_segment_wrappers()[0]
+    cache_wrapper_input = next(
+        op
+        for op in cache_wrapper.body
+        if isinstance(op, PlaceholderOp)
+        and op.name == f"__wrapper_arg{cache_slot}"
+    )
+    assert tensor_shape(cache_wrapper_input.tensor_meta) == (1, 1, 4, 1)
+    cache_declaration = next(
+        op for op in cache_wrapper.body if isinstance(op, FuncOp)
+    )
+    assert tensor_shape(cache_declaration.args[cache_slot]) == (1, 1, 4, 1)
+    cache_runtime_plan = cache_driver.build_parallel_runtime_plan()
+    cache_resource = cache_runtime_plan["runtime_inputs"][1]
+    assert cache_runtime_plan["resources"][cache_resource]["shape"] == (
+        1,
+        1,
+        4,
+        1,
+    )
+    cache_subgraph.lower_to_top_level_ir()
+    cache_mlir = str(cache_subgraph._imported_module)
+    assert "tensor<1x1x4x1xf32>" in cache_mlir
+    assert not (
+        "memref<1x2x4x1xf32>" in cache_mlir
+        and "tensor<1x1x4x1xf32>" in cache_mlir
+    )
 
 
 # The implicit parameter-pack path retains its dtype-local sequential offsets.

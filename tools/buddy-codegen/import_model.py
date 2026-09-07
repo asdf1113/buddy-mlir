@@ -723,15 +723,19 @@ def _lower_parallel_driver_artifacts(driver, phase_dir: str) -> None:
             pack_sizes.get(dtype, 0), layout["offset"] + layout["numel"]
         )
     for key, wrapper in driver._parallel_segment_wrappers.items():
+        bindings = driver._wrapper_parameter_bindings[key]
         offsets = {
             name: driver._rank_parameter_layout[parameter_index]["offset"]
-            for name, parameter_index in driver._wrapper_parameter_bindings[
-                key
-            ].items()
+            for name, parameter_index in bindings.items()
+        }
+        wrapper_pack_sizes = {
+            layout["dtype"]: pack_sizes[layout["dtype"]]
+            for parameter_index in bindings.values()
+            for layout in (driver._rank_parameter_layout[parameter_index],)
         }
         wrapper.lower_to_top_level_ir(
             do_param_pack=True,
-            param_pack_sizes=pack_sizes,
+            param_pack_sizes=wrapper_pack_sizes,
             param_pack_offsets=offsets,
         )
         with open(

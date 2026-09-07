@@ -775,6 +775,8 @@ function(buddy_add_model)
 
   if(MDL_MODEL_SO_NAME)
     set(MODEL_SO_BASENAME "${MDL_MODEL_SO_NAME}")
+  elseif(MDL_PARALLEL_RUNTIME)
+    set(MODEL_SO_BASENAME "${MDL_NAME}_tp_model.so")
   else()
     set(MODEL_SO_BASENAME "${MDL_NAME}_model.so")
   endif()
@@ -1090,6 +1092,43 @@ function(buddy_add_model)
       # ── Stage 2/3: partitioned MLIR → .o → .so via compile_pipeline.py ───
       set(PARTITIONED_MLIR_SRC "${MLIR_SRC}/layer_partitioned")
       set(PARTITIONED_OBJ_DIR "${BIN}/obj_partitioned")
+      set(_MDL_TP_COMPILE_ARGS)
+      set(_MDL_TP_COMPILE_DEPS)
+      set(_MDL_TP_VALIDATE_COMMAND)
+      if(MDL_PARALLEL_RUNTIME)
+        set(RAX_SHIMS "${GEN_DIR}/RaxShims.cpp")
+        set(RAX_SHIM_GENERATOR "${BUDDY_CODEGEN_DIR}/gen_rax_shims.py")
+        set(_MDL_TP_RUNTIME_PLAN_ARGS)
+        foreach(_runtime_plan ${MDL_PARALLEL_RUNTIME_PLAN_FILES})
+          list(APPEND _MDL_TP_RUNTIME_PLAN_ARGS
+            --runtime-plan "${_runtime_plan}")
+        endforeach()
+        list(APPEND _MDL_TP_COMPILE_ARGS
+          ${_MDL_TP_RUNTIME_PLAN_ARGS}
+          --rax-shims "${RAX_SHIMS}")
+        list(APPEND _MDL_TP_COMPILE_DEPS
+          "${RAX_SHIMS}"
+          "${RAX_SHIM_GENERATOR}"
+          ${MDL_PARALLEL_RUNTIME_PLAN_FILES})
+
+        add_custom_command(
+          OUTPUT "${RAX_SHIMS}"
+          COMMAND "${Python3_EXECUTABLE}" "${RAX_SHIM_GENERATOR}"
+                  ${_MDL_TP_RUNTIME_PLAN_ARGS}
+                  -o "${RAX_SHIMS}"
+          DEPENDS
+            "${IMPORT_STAMP}"
+            "${RAX_SHIM_GENERATOR}"
+            ${MDL_PARALLEL_RUNTIME_PLAN_FILES}
+          COMMENT "[${MDL_NAME}] Generating runtime-plan RAX shims"
+          VERBATIM
+        )
+
+        set(_MDL_TP_VALIDATE_COMMAND
+          COMMAND "${Python3_EXECUTABLE}" "${RAX_SHIM_GENERATOR}"
+                  ${_MDL_TP_RUNTIME_PLAN_ARGS}
+                  --validate-library "${MODEL_SO}")
+      endif()
       add_custom_command(
         OUTPUT "${MODEL_SO}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${PARTITIONED_OBJ_DIR}"
@@ -1106,13 +1145,16 @@ function(buddy_add_model)
                 --cxx "${CMAKE_CXX_COMPILER}"
                 --llvm-lib-dir "${LLVM_LIBRARY_DIR}"
                 ${MDL_OPENMP_RUNTIME_ARGS}
+                ${_MDL_TP_COMPILE_ARGS}
                 -j "${MDL_COMPILE_JOBS}"
+        ${_MDL_TP_VALIDATE_COMMAND}
         DEPENDS
           buddy-opt
           "${GEN_CONFIG}"
           "${BUDDY_CODEGEN_DIR}/compile_pipeline.py"
+          ${_MDL_TP_COMPILE_DEPS}
           ${MLIR_COMPILE_DEPS}
-        COMMENT "[${MDL_NAME}] Stage 2/3: partitioned MLIR → ${MDL_NAME}_model.so"
+        COMMENT "[${MDL_NAME}] Stage 2/3: partitioned MLIR → ${MODEL_SO_BASENAME}"
         VERBATIM
       )
     else()
