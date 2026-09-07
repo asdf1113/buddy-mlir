@@ -111,3 +111,15 @@ buddy_add_model(
   TIERED_KV_CACHE "${_BUDDY_DSR1_TIERED_ENABLED}"
   TIERED_CACHE_SIZES "${_BUDDY_DSR1_TIERED_CACHE_SIZES}"
 )
+
+target_sources(buddy_models_deepseek_r1 PRIVATE
+  DeepSeekR1RaxSession.cpp
+)
+target_link_libraries(buddy_models_deepseek_r1 PUBLIC
+  buddy_runtime_execution
+)
+install(FILES
+  include/buddy/runtime/models/DeepSeekR1RaxSession.h
+  DESTINATION include/buddy-mlir/buddy/runtime/models
+  COMPONENT buddy_runtime
+)
