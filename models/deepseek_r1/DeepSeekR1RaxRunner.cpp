@@ -30,7 +30,8 @@ void checkMpi(int status, const char *operation) {
 
 } // namespace
 
-void runDeepSeekR1Rax(const std::string &raxPath, int tensorParallelSize) {
+void runDeepSeekR1Rax(const std::string &raxPath, int tensorParallelSize,
+                      const DeepSeekR1RaxSessionCallback &callback) {
   namespace fs = std::filesystem;
 
   if (tensorParallelSize <= 1)
@@ -75,8 +76,7 @@ void runDeepSeekR1Rax(const std::string &raxPath, int tensorParallelSize) {
               << rankRax.string() << '\n';
 
     DeepSeekR1RaxSession session(rankRax.string(), communicator);
-    session.forwardPrefill();
-    session.forwardDecode();
+    callback(session, rank);
   } catch (...) {
     if (ownsMpi)
       MPI_Finalize();

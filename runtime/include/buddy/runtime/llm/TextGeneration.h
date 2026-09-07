@@ -98,11 +98,13 @@ void printStats(const GenerationResult &result, bool verbose = false);
 /// Run a single generation pass: tokenize → prefill → decode loop.
 /// Resets session position before prefill (safe for multi-turn reuse).
 /// Weights must already be loaded into the session via loadWeights().
+/// When emitOutput is false, generation still runs but stdout stays silent.
 GenerationResult runGeneration(const std::string &prompt, LLMSession &session,
                                const std::string &vocabPath, int maxNewTokens,
                                const std::vector<long long> &stopTokenIds,
                                buddy::Sampler &sampler, const TextCodec &codec,
-                               bool suppress, bool streamJsonl = false);
+                               bool suppress, bool streamJsonl = false,
+                               bool emitOutput = true);
 
 } // namespace runtime
 } // namespace buddy
