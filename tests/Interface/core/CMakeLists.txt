@@ -56,6 +56,22 @@ target_compile_definitions(buddy-rax-executor-test PRIVATE
 )
 add_dependencies(buddy-rax-executor-test buddy-rax-executor-test-kernels)
 
+_add_test_executable(buddy-rax-execution-session-test
+  RaxExecutionSessionTest.cpp
+  "${CMAKE_SOURCE_DIR}/models/deepseek_r1/DeepSeekR1RaxSession.cpp"
+  LINK_LIBS
+    buddy_runtime_execution
+)
+target_include_directories(buddy-rax-execution-session-test PRIVATE
+  "${CMAKE_SOURCE_DIR}/models/deepseek_r1/include"
+)
+target_compile_definitions(buddy-rax-execution-session-test PRIVATE
+  RAX_EXECUTION_SESSION_TEST_LIBRARY="$<TARGET_FILE:buddy-rax-executor-test-kernels>"
+)
+add_dependencies(buddy-rax-execution-session-test
+  buddy-rax-executor-test-kernels
+)
+
 set(RAX_WRAPPER_ABI_TEST_OBJECT
   "${CMAKE_CURRENT_BINARY_DIR}/RaxWrapperAbiTest.o")
 add_custom_command(

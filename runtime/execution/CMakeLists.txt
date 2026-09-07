@@ -1,4 +1,5 @@
 add_library(buddy_runtime_execution STATIC
+  RaxExecutionSession.cpp
   RaxExecutor.cpp
 )
 target_link_libraries(buddy_runtime_execution PUBLIC
