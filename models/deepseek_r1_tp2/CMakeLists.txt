@@ -160,10 +160,11 @@ if(TARGET python-package-buddy)
   list(APPEND _TP2_IMPORT_DEPS python-package-buddy)
 endif()
 add_custom_command(
-  OUTPUT "${_TP2_IMPORT_STAMP}"
-  BYPRODUCTS
+  OUTPUT
+    "${_TP2_IMPORT_STAMP}"
     ${_TP2_RUNTIME_PLANS}
     ${_TP2_PARAMETER_PACKS}
+  BYPRODUCTS
     "${_TP2_LAYER}/partition_manifest.json"
     "${_TP2_LAYER}/forward_prefill.mlir"
     "${_TP2_LAYER}/forward_decode.mlir"
