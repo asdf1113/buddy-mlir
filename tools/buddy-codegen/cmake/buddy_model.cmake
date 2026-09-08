@@ -52,8 +52,6 @@ option(BUDDY_MODEL_LEGACY_LAYER_PARTITION
 option(BUDDY_MODEL_LAYER_PARTITION_DEBUG_WRAPPERS
   "Emit per-partition forward_* debug wrapper MLIR files for legacy layer partitioning"
   OFF)
-set(BUDDY_DEEPSEEK_R1_TENSOR_PARALLEL_SIZE "1" CACHE STRING
-  "Experimental DeepSeek template tensor-parallel size (currently 1 or 2)")
 option(BUDDY_MODEL_REUSE_WEIGHTS
   "Reuse existing model weight data when a matching weight manifest is present"
   ON)
@@ -97,7 +95,6 @@ endif()
 #   [NUM_THREADS  <N>]                      OpenMP threads (default from spec)
 #   [LLC_ATTRS    <string>]                 LLC target attributes
 #   [COMPILE_JOBS <N>]                      parallel MLIR compilation jobs
-#   [PARAMETER_PACK_DTYPE <dtype>]          generated rank-pack filename dtype
 #   [MODEL_KIND   <kind>]                   llm_prefill_decode (default),
 #                                           single_forward, or
 #                                           qwen3_vl_multimodal
@@ -168,7 +165,7 @@ function(buddy_add_model)
   cmake_parse_arguments(
     MDL                                      # prefix
     ""                                       # flags
-    "NAME;SPEC;RUNNER_SRC;RUNNER_PLUGIN_SRC;RUNNER_HDR;SERVING_PLUGIN_SRC;SERVING_LIBRARY;EMBEDDING_PLUGIN_SRC;EMBEDDING_LIBRARY;MASKED_LM_PLUGIN_SRC;MASKED_LM_LIBRARY;TRANSCRIPTION_PLUGIN_SRC;TRANSCRIPTION_LIBRARY;HF_CONFIG;LOCAL_MODEL;BUILD_DIR;MLIR_DIR;NUM_THREADS;LLC_ATTRS;COMPILE_JOBS;PARAMETER_PACK_DTYPE;TIERED_KV_CACHE;MODEL_KIND;IMPORT_SCRIPT;MANIFEST_SCRIPT;LOCAL_MODEL_ENV;MODEL_SO_NAME;TEMPLATE_PARTITION_CAPABLE"
+    "NAME;SPEC;RUNNER_SRC;RUNNER_PLUGIN_SRC;RUNNER_HDR;SERVING_PLUGIN_SRC;SERVING_LIBRARY;EMBEDDING_PLUGIN_SRC;EMBEDDING_LIBRARY;MASKED_LM_PLUGIN_SRC;MASKED_LM_LIBRARY;TRANSCRIPTION_PLUGIN_SRC;TRANSCRIPTION_LIBRARY;HF_CONFIG;LOCAL_MODEL;BUILD_DIR;MLIR_DIR;NUM_THREADS;LLC_ATTRS;COMPILE_JOBS;TIERED_KV_CACHE;MODEL_KIND;IMPORT_SCRIPT;MANIFEST_SCRIPT;LOCAL_MODEL_ENV;MODEL_SO_NAME;TEMPLATE_PARTITION_CAPABLE"
     "EXTRA_SRCS;TIERED_CACHE_SIZES;ASSET_FILES;RUNTIME_LINK_LIBS" # multi-value
     ${ARGN}
   )
@@ -258,36 +255,6 @@ function(buddy_add_model)
     else()
       set(MDL_LAYER_PARTITION ON)
     endif()
-  endif()
-
-  set(MDL_PARALLEL_RUNTIME OFF)
-  if(BUDDY_DEEPSEEK_R1_TENSOR_PARALLEL_SIZE LESS 1)
-    message(FATAL_ERROR
-      "BUDDY_DEEPSEEK_R1_TENSOR_PARALLEL_SIZE must be positive")
-  endif()
-  if(MDL_NAME STREQUAL "deepseek_r1" AND
-     BUDDY_DEEPSEEK_R1_TENSOR_PARALLEL_SIZE GREATER 1)
-    if(NOT BUDDY_DEEPSEEK_R1_TENSOR_PARALLEL_SIZE EQUAL 2)
-      message(FATAL_ERROR
-        "buddy_add_model (${MDL_NAME}): the current tensor-parallel planner supports size 2 only")
-    endif()
-    if(NOT MDL_LAYER_PARTITION OR BUDDY_MODEL_LEGACY_LAYER_PARTITION)
-      message(FATAL_ERROR
-        "buddy_add_model (${MDL_NAME}): tensor parallel runtime artifacts require template layer partitioning")
-    endif()
-    if(MDL_MLIR_DIR OR MDL_BUILD_DIR)
-      message(FATAL_ERROR
-        "buddy_add_model (${MDL_NAME}): tensor parallel runtime artifacts require the frontend import path")
-    endif()
-    if(MDL_TIERED_KV_CACHE)
-      message(FATAL_ERROR
-        "buddy_add_model (${MDL_NAME}): tensor parallel runtime artifacts do not support tiered KV cache")
-    endif()
-    if(NOT MDL_PARAMETER_PACK_DTYPE)
-      message(FATAL_ERROR
-        "buddy_add_model (${MDL_NAME}): tensor parallel runtime artifacts require a plain-weight parameter-pack dtype")
-    endif()
-    set(MDL_PARALLEL_RUNTIME ON)
   endif()
 
   set(MDL_GEN_MANIFEST_ARGS)
@@ -442,7 +409,7 @@ function(buddy_add_model)
       COMMENT "[${MDL_NAME}] Generating ${MDL_NAME}.mlir (RHAL manifest)"
       VERBATIM
     )
-  elseif(NOT MDL_CUSTOM_QWEN3_VL AND NOT MDL_PARALLEL_RUNTIME)
+  elseif(NOT MDL_CUSTOM_QWEN3_VL)
     add_custom_command(
       OUTPUT  "${GEN_RHAL}"
       COMMAND "${Python3_EXECUTABLE}" "${MDL_MANIFEST_SCRIPT}"
@@ -775,8 +742,6 @@ function(buddy_add_model)
 
   if(MDL_MODEL_SO_NAME)
     set(MODEL_SO_BASENAME "${MDL_MODEL_SO_NAME}")
-  elseif(MDL_PARALLEL_RUNTIME)
-    set(MODEL_SO_BASENAME "${MDL_NAME}_tp_model.so")
   else()
     set(MODEL_SO_BASENAME "${MDL_NAME}_model.so")
   endif()
@@ -1025,26 +990,8 @@ function(buddy_add_model)
       if(BUDDY_MODEL_REUSE_WEIGHTS)
         list(APPEND _IMPORT_MODEL_EXTRA_ARGS --reuse-existing-weights)
       endif()
-      set(MDL_PARALLEL_RUNTIME_PLAN_FILES)
-      set(MDL_PARALLEL_PARAMETER_PACK_FILES)
-      if(MDL_PARALLEL_RUNTIME)
-        list(APPEND _IMPORT_MODEL_EXTRA_ARGS
-          --tensor-parallel-size "${BUDDY_DEEPSEEK_R1_TENSOR_PARALLEL_SIZE}")
-        math(EXPR _MDL_LAST_TP_RANK
-          "${BUDDY_DEEPSEEK_R1_TENSOR_PARALLEL_SIZE} - 1")
-        foreach(_rank RANGE 0 ${_MDL_LAST_TP_RANK})
-          list(APPEND MDL_PARALLEL_RUNTIME_PLAN_FILES
-            "${BIN}/layer_partitioned/runtime/rank${_rank}_forward_prefill.json"
-            "${BIN}/layer_partitioned/runtime/rank${_rank}_forward_decode.json")
-          list(APPEND MDL_PARALLEL_PARAMETER_PACK_FILES
-            "${BIN}/rank${_rank}_params_${MDL_PARAMETER_PACK_DTYPE}.data")
-        endforeach()
-      endif()
       add_custom_command(
         OUTPUT "${IMPORT_STAMP}"
-        BYPRODUCTS
-          ${MDL_PARALLEL_RUNTIME_PLAN_FILES}
-          ${MDL_PARALLEL_PARAMETER_PACK_FILES}
         COMMAND ${_IMPORT_ENV}
                 "${Python3_EXECUTABLE}" "${BUDDY_CODEGEN_DIR}/import_model.py"
                 --config "${GEN_CONFIG}" --output-dir "${BIN}"
@@ -1092,43 +1039,6 @@ function(buddy_add_model)
       # ── Stage 2/3: partitioned MLIR → .o → .so via compile_pipeline.py ───
       set(PARTITIONED_MLIR_SRC "${MLIR_SRC}/layer_partitioned")
       set(PARTITIONED_OBJ_DIR "${BIN}/obj_partitioned")
-      set(_MDL_TP_COMPILE_ARGS)
-      set(_MDL_TP_COMPILE_DEPS)
-      set(_MDL_TP_VALIDATE_COMMAND)
-      if(MDL_PARALLEL_RUNTIME)
-        set(RAX_SHIMS "${GEN_DIR}/RaxShims.cpp")
-        set(RAX_SHIM_GENERATOR "${BUDDY_CODEGEN_DIR}/gen_rax_shims.py")
-        set(_MDL_TP_RUNTIME_PLAN_ARGS)
-        foreach(_runtime_plan ${MDL_PARALLEL_RUNTIME_PLAN_FILES})
-          list(APPEND _MDL_TP_RUNTIME_PLAN_ARGS
-            --runtime-plan "${_runtime_plan}")
-        endforeach()
-        list(APPEND _MDL_TP_COMPILE_ARGS
-          ${_MDL_TP_RUNTIME_PLAN_ARGS}
-          --rax-shims "${RAX_SHIMS}")
-        list(APPEND _MDL_TP_COMPILE_DEPS
-          "${RAX_SHIMS}"
-          "${RAX_SHIM_GENERATOR}"
-          ${MDL_PARALLEL_RUNTIME_PLAN_FILES})
-
-        add_custom_command(
-          OUTPUT "${RAX_SHIMS}"
-          COMMAND "${Python3_EXECUTABLE}" "${RAX_SHIM_GENERATOR}"
-                  ${_MDL_TP_RUNTIME_PLAN_ARGS}
-                  -o "${RAX_SHIMS}"
-          DEPENDS
-            "${IMPORT_STAMP}"
-            "${RAX_SHIM_GENERATOR}"
-            ${MDL_PARALLEL_RUNTIME_PLAN_FILES}
-          COMMENT "[${MDL_NAME}] Generating runtime-plan RAX shims"
-          VERBATIM
-        )
-
-        set(_MDL_TP_VALIDATE_COMMAND
-          COMMAND "${Python3_EXECUTABLE}" "${RAX_SHIM_GENERATOR}"
-                  ${_MDL_TP_RUNTIME_PLAN_ARGS}
-                  --validate-library "${MODEL_SO}")
-      endif()
       add_custom_command(
         OUTPUT "${MODEL_SO}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${PARTITIONED_OBJ_DIR}"
@@ -1145,14 +1055,11 @@ function(buddy_add_model)
                 --cxx "${CMAKE_CXX_COMPILER}"
                 --llvm-lib-dir "${LLVM_LIBRARY_DIR}"
                 ${MDL_OPENMP_RUNTIME_ARGS}
-                ${_MDL_TP_COMPILE_ARGS}
                 -j "${MDL_COMPILE_JOBS}"
-        ${_MDL_TP_VALIDATE_COMMAND}
         DEPENDS
           buddy-opt
           "${GEN_CONFIG}"
           "${BUDDY_CODEGEN_DIR}/compile_pipeline.py"
-          ${_MDL_TP_COMPILE_DEPS}
           ${MLIR_COMPILE_DEPS}
         COMMENT "[${MDL_NAME}] Stage 2/3: partitioned MLIR → ${MODEL_SO_BASENAME}"
         VERBATIM
@@ -1310,116 +1217,41 @@ function(buddy_add_model)
     list(APPEND RAX_PACK_ARGS --embed-payload)
   endif()
 
-  if(MDL_PARALLEL_RUNTIME)
-    math(EXPR _MDL_LAST_TP_RANK
-      "${BUDDY_DEEPSEEK_R1_TENSOR_PARALLEL_SIZE} - 1")
-    set(MODEL_RAX_FILES)
+  set(MODEL_RAX "${BIN}/${MDL_NAME}.rax")
 
-    foreach(_rank RANGE 0 ${_MDL_LAST_TP_RANK})
-      set(_rank_prefill_plan
-        "${BIN}/layer_partitioned/runtime/rank${_rank}_forward_prefill.json")
-      set(_rank_decode_plan
-        "${BIN}/layer_partitioned/runtime/rank${_rank}_forward_decode.json")
-      set(_rank_rhal "${BIN}/rank${_rank}.rhal.mlir")
-      set(_rank_rax "${BIN}/rank${_rank}.rax")
-      set(_rank_parameter_pack
-        "${BIN}/rank${_rank}_params_${MDL_PARAMETER_PACK_DTYPE}.data")
+  set(MDL_STAGE4_DEPS
+    rax-pack
+    "${GEN_RHAL}"
+    "${MODEL_SO}"
+    ${RUNNER_PLUGIN_TARGET}
+    ${EMBEDDING_PLUGIN_TARGET}
+    ${MASKED_LM_PLUGIN_TARGET}
+    ${TRANSCRIPTION_PLUGIN_TARGET}
+    ${MDL_ASSET_DSTS}
+  )
 
-      add_custom_command(
-        OUTPUT "${_rank_rhal}"
-        COMMAND "${Python3_EXECUTABLE}" "${MDL_MANIFEST_SCRIPT}"
-                --config "${GEN_CONFIG}"
-                --runtime-plan "forward_prefill=${_rank_prefill_plan}"
-                --runtime-plan "forward_decode=${_rank_decode_plan}"
-                --kernel-library "${MODEL_SO_BASENAME}"
-                --runner-library "${RUNNER_PLUGIN_NAME}"
-                ${MDL_GEN_MANIFEST_ARGS}
-                -o "${_rank_rhal}"
-        DEPENDS
-          "${IMPORT_STAMP}"
-          "${_rank_prefill_plan}"
-          "${_rank_decode_plan}"
-          "${GEN_CONFIG}"
-          "${MDL_MANIFEST_SCRIPT}"
-        COMMENT
-          "[${MDL_NAME}] Generating rank${_rank}.rhal.mlir (scheduled RHAL manifest)"
-        VERBATIM
-      )
-
-      set(_RANK_STAGE4_DEPS
-        rax-pack
-        "${_rank_rhal}"
-        "${_rank_parameter_pack}"
-        "${IMPORT_STAMP}"
-        "${MODEL_SO}"
-        ${RUNNER_PLUGIN_TARGET}
-        ${EMBEDDING_PLUGIN_TARGET}
-        ${MASKED_LM_PLUGIN_TARGET}
-        ${TRANSCRIPTION_PLUGIN_TARGET}
-        ${MDL_ASSET_DSTS}
-      )
-
-      if(SERVING_PLUGIN_TARGET)
-        list(APPEND _RANK_STAGE4_DEPS ${SERVING_PLUGIN_TARGET})
-      endif()
-
-      list(APPEND _RANK_STAGE4_DEPS ${MDL_EXTRA_STAGE4_DEPS})
-
-      add_custom_command(
-        OUTPUT "${_rank_rax}"
-        COMMAND "${CMAKE_BINARY_DIR}/bin/rax-pack"
-                "${_rank_rhal}" -o "${_rank_rax}" ${RAX_PACK_ARGS}
-        DEPENDS ${_RANK_STAGE4_DEPS}
-        WORKING_DIRECTORY "${BIN}"
-        COMMENT "[${MDL_NAME}] Stage 4: packing rank${_rank}.rax"
-        VERBATIM
-      )
-
-      list(APPEND MODEL_RAX_FILES "${_rank_rax}")
-    endforeach()
-
-    add_custom_target(${MDL_NAME}_rax
-      DEPENDS ${MODEL_RAX_FILES} ${MDL_ASSET_DSTS}
-      COMMENT "rank-local .rax modules -> ${BIN}"
-    )
-
-  else()
-    set(MODEL_RAX "${BIN}/${MDL_NAME}.rax")
-
-    set(MDL_STAGE4_DEPS
-      rax-pack
-      "${GEN_RHAL}"
-      "${MODEL_SO}"
-      ${RUNNER_PLUGIN_TARGET}
-      ${EMBEDDING_PLUGIN_TARGET}
-      ${MASKED_LM_PLUGIN_TARGET}
-      ${TRANSCRIPTION_PLUGIN_TARGET}
-      ${MDL_ASSET_DSTS}
-    )
-
-    if(MDL_MODEL_KIND STREQUAL "single_forward")
-      list(APPEND MDL_STAGE4_DEPS "${BIN}/arg0.data")
-    endif()
-
-    if(SERVING_PLUGIN_TARGET)
-      list(APPEND MDL_STAGE4_DEPS ${SERVING_PLUGIN_TARGET})
-    endif()
-
-    list(APPEND MDL_STAGE4_DEPS ${MDL_EXTRA_STAGE4_DEPS})
-
-    add_custom_command(
-      OUTPUT "${MODEL_RAX}"
-      COMMAND "${CMAKE_BINARY_DIR}/bin/rax-pack"
-              "${GEN_RHAL}" -o "${MODEL_RAX}" ${RAX_PACK_ARGS}
-      DEPENDS ${MDL_STAGE4_DEPS}
-      COMMENT "[${MDL_NAME}] Stage 4: packing ${MDL_NAME}.rax"
-      VERBATIM
-    )
-
-    add_custom_target(${MDL_NAME}_rax
-      DEPENDS "${MODEL_RAX}" ${MDL_ASSET_DSTS}
-      COMMENT "${MDL_NAME}.rax -> ${BIN}"
-    )
+  if(MDL_MODEL_KIND STREQUAL "single_forward")
+    list(APPEND MDL_STAGE4_DEPS "${BIN}/arg0.data")
   endif()
+
+  if(SERVING_PLUGIN_TARGET)
+    list(APPEND MDL_STAGE4_DEPS ${SERVING_PLUGIN_TARGET})
+  endif()
+
+  list(APPEND MDL_STAGE4_DEPS ${MDL_EXTRA_STAGE4_DEPS})
+
+  add_custom_command(
+    OUTPUT "${MODEL_RAX}"
+    COMMAND "${CMAKE_BINARY_DIR}/bin/rax-pack"
+            "${GEN_RHAL}" -o "${MODEL_RAX}" ${RAX_PACK_ARGS}
+    DEPENDS ${MDL_STAGE4_DEPS}
+    COMMENT "[${MDL_NAME}] Stage 4: packing ${MDL_NAME}.rax"
+    VERBATIM
+  )
+
+  add_custom_target(${MDL_NAME}_rax
+    DEPENDS "${MODEL_RAX}" ${MDL_ASSET_DSTS}
+    COMMENT "${MDL_NAME}.rax -> ${BIN}"
+  )
 
 endfunction()
