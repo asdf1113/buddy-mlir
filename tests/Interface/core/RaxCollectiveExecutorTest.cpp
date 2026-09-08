@@ -19,30 +19,6 @@ using namespace rhal::rax;
 
 namespace {
 
-struct MemRef2DF32 {
-  float *allocated;
-  float *aligned;
-  int64_t offset;
-  int64_t sizes[2];
-  int64_t strides[2];
-};
-
-struct MemRef1DF32 {
-  float *allocated;
-  float *aligned;
-  int64_t offset;
-  int64_t sizes[1];
-  int64_t strides[1];
-};
-
-struct MemRef1DU16 {
-  uint16_t *allocated;
-  uint16_t *aligned;
-  int64_t offset;
-  int64_t sizes[1];
-  int64_t strides[1];
-};
-
 struct Event {
   enum class Kind { Broadcast, AllReduce, AllGatherV, ReduceScatter } kind;
   const void *sendBuffer = nullptr;
@@ -81,6 +57,9 @@ public:
     event.dataType = dataType;
     event.reduction = reduction;
     events.push_back(std::move(event));
+    auto *data = static_cast<float *>(recvBuffer);
+    for (size_t i = 0; i < count; ++i)
+      data[i] *= 2.0f;
   }
 
   void allGatherV(const void *sendBuffer, size_t sendCount, void *recvBuffer,
@@ -127,6 +106,7 @@ void expectRuntimeError(Callable &&callable, const char *message) {
 
 void writeTestRax(const std::string &path) {
   flatbuffers::FlatBufferBuilder builder;
+  const std::string uri = "file:" RAX_EXECUTOR_TEST_LIBRARY;
 
   const std::vector<int64_t> f32Shape = {2, 2};
   const std::vector<int64_t> f32Strides = {2, 1};
@@ -230,9 +210,40 @@ void writeTestRax(const std::string &path) {
                      builder.CreateVector(reduceScatterOutputs), 0,
                      builder.CreateVector(reduceScatterOps), 0);
 
-  const std::vector<flatbuffers::Offset<CodeObject>> codeObjects;
+  auto producerCodeObject = CreateCodeObject(
+      builder, 10, builder.CreateString("collective_producer"),
+      CodeObjectKind_HostSharedLib, 0, builder.CreateString(uri),
+      builder.CreateString("collective_producer"), builder.CreateString("cpu"),
+      0);
+  auto consumerCodeObject = CreateCodeObject(
+      builder, 11, builder.CreateString("collective_consumer"),
+      CodeObjectKind_HostSharedLib, 0, builder.CreateString(uri),
+      builder.CreateString("collective_consumer"), builder.CreateString("cpu"),
+      0);
+  const std::vector<flatbuffers::Offset<Arg>> dispatchArguments = {
+      CreateArg(builder, 1, 0, 0, 0)};
+  auto producerDispatch = CreateDispatchOp(
+      builder, 10, builder.CreateVector(dispatchArguments), 0, 0);
+  auto sequenceAllReduce = CreateCollectiveOp(
+      builder, CollectiveKind_AllReduce, builder.CreateVector(reduceOperands),
+      ReductionKind_Sum, -1, 0);
+  auto consumerDispatch = CreateDispatchOp(
+      builder, 11, builder.CreateVector(dispatchArguments), 0, 0);
+  const std::vector<flatbuffers::Offset<Op>> sequenceOps = {
+      CreateOp(builder, OpKind_Dispatch, producerDispatch, 0, 0, 0, 0, 0),
+      CreateOp(builder, OpKind_Collective, 0, 0, 0, 0, 0, 0, sequenceAllReduce),
+      CreateOp(builder, OpKind_Dispatch, consumerDispatch, 0, 0, 0, 0, 0)};
+  auto sequenceFunction = CreateFunction(
+      builder, builder.CreateString("dispatch_collective_dispatch"),
+      builder.CreateVector(functionBuffers),
+      builder.CreateVector(functionBuffers), 0,
+      builder.CreateVector(sequenceOps), 0);
+
+  const std::vector<flatbuffers::Offset<CodeObject>> codeObjects = {
+      producerCodeObject, consumerCodeObject};
   const std::vector<flatbuffers::Offset<Function>> functions = {
-      collectivesFunction, allGatherVFunction, reduceScatterFunction};
+      collectivesFunction, allGatherVFunction, reduceScatterFunction,
+      sequenceFunction};
   auto module = CreateModule(
       builder, builder.CreateString("RAX"), CreateVersion(builder, 0, 1, 0),
       Endianness_Little, 0, 0, builder.CreateVector(buffers), 0,
@@ -247,8 +258,8 @@ void writeTestRax(const std::string &path) {
 }
 
 void checkManifest(const buddy::runtime::ModelManifest &manifest) {
-  if (!manifest.codeObjects.empty())
-    throw std::runtime_error("collective-only manifest has code objects");
+  if (manifest.codeObjects.size() != 2)
+    throw std::runtime_error("dispatch code objects were not parsed");
   if (manifest.buffers.size() != 6)
     throw std::runtime_error("buffer metadata was not parsed");
   const auto &buffer = manifest.buffers[0];
@@ -261,7 +272,7 @@ void checkManifest(const buddy::runtime::ModelManifest &manifest) {
       buffer.attrs.at("role") != "activation")
     throw std::runtime_error("buffer metadata was not preserved");
 
-  if (manifest.functions.size() != 3 || manifest.functions[0].ops.size() != 3)
+  if (manifest.functions.size() != 4 || manifest.functions[0].ops.size() != 3)
     throw std::runtime_error("collective operation sequence was not parsed");
   const auto &broadcast = manifest.functions[0].ops[0];
   if (broadcast.kind != OpKind_Collective ||
@@ -315,29 +326,12 @@ int main(int argc, char **argv) {
     auto manifest = buddy::runtime::ModelManifest::loadFromRax(argv[1]);
     checkManifest(manifest);
 
-    std::array<float, 5> f32Data = {};
-    std::array<uint16_t, 4> u16Data = {};
-    std::array<float, 3> allGatherVInputData = {};
-    std::array<float, 5> allGatherVOutputData = {};
-    std::array<float, 5> reduceScatterInputData = {};
-    std::array<float, 3> reduceScatterOutputData = {};
-    MemRef2DF32 f32Descriptor = {
-        f32Data.data(), f32Data.data(), 1, {2, 2}, {2, 1}};
-    MemRef1DU16 u16Descriptor = {u16Data.data(), u16Data.data(), 1, {3}, {1}};
-    MemRef1DF32 allGatherVInputDescriptor = {
-        allGatherVInputData.data(), allGatherVInputData.data(), 1, {2}, {1}};
-    MemRef1DF32 allGatherVOutputDescriptor = {
-        allGatherVOutputData.data(), allGatherVOutputData.data(), 1, {4}, {1}};
-    MemRef1DF32 reduceScatterInputDescriptor = {reduceScatterInputData.data(),
-                                                reduceScatterInputData.data(),
-                                                1,
-                                                {4},
-                                                {1}};
-    MemRef1DF32 reduceScatterOutputDescriptor = {reduceScatterOutputData.data(),
-                                                 reduceScatterOutputData.data(),
-                                                 1,
-                                                 {2},
-                                                 {1}};
+    std::array<float, 16> f32Data = {};
+    std::array<uint16_t, 24> u16Data = {};
+    std::array<float, 16> allGatherVInputData = {};
+    std::array<float, 16> allGatherVOutputData = {};
+    std::array<float, 16> reduceScatterInputData = {};
+    std::array<float, 16> reduceScatterOutputData = {};
 
     buddy::runtime::RaxExecutor noCommunicator(manifest);
     expectRuntimeError([&] { noCommunicator.execute("collectives"); },
@@ -345,12 +339,12 @@ int main(int argc, char **argv) {
 
     FakeCommunicator communicator;
     buddy::runtime::RaxExecutor executor(manifest, communicator);
-    executor.bindBuffer(1, &f32Descriptor);
-    executor.bindBuffer(2, &u16Descriptor);
-    executor.bindBuffer(3, &allGatherVInputDescriptor);
-    executor.bindBuffer(4, &allGatherVOutputDescriptor);
-    executor.bindBuffer(5, &reduceScatterInputDescriptor);
-    executor.bindBuffer(6, &reduceScatterOutputDescriptor);
+    executor.bindBuffer(1, f32Data.data());
+    executor.bindBuffer(2, u16Data.data());
+    executor.bindBuffer(3, allGatherVInputData.data());
+    executor.bindBuffer(4, allGatherVOutputData.data());
+    executor.bindBuffer(5, reduceScatterInputData.data());
+    executor.bindBuffer(6, reduceScatterOutputData.data());
     executor.execute("collectives");
     executor.execute("all_gather_v");
     executor.execute("reduce_scatter");
@@ -363,34 +357,46 @@ int main(int argc, char **argv) {
     const Event &fourth = communicator.events[3];
     const Event &fifth = communicator.events[4];
     if (first.kind != Event::Kind::Broadcast ||
-        first.recvBuffer != f32Data.data() + 1 || first.amount != 16 ||
+        first.recvBuffer != f32Data.data() || first.amount != 16 ||
         first.root != 1 || second.kind != Event::Kind::Broadcast ||
-        second.recvBuffer != u16Data.data() + 1 || second.amount != 6 ||
+        second.recvBuffer != u16Data.data() || second.amount != 6 ||
         second.root != 1)
       throw std::runtime_error(
-          "Broadcast operands or ranked memref data were incorrect");
+          "Broadcast operands or raw payload pointers were incorrect");
     if (third.kind != Event::Kind::AllReduce ||
-        third.sendBuffer != f32Data.data() + 1 ||
-        third.recvBuffer != f32Data.data() + 1 || third.amount != 4 ||
+        third.sendBuffer != f32Data.data() ||
+        third.recvBuffer != f32Data.data() || third.amount != 4 ||
         third.dataType != buddy::runtime::DataType::F32 ||
         third.reduction != buddy::runtime::ReductionOp::Sum)
       throw std::runtime_error("F32/Sum AllReduce call was incorrect");
     if (fourth.kind != Event::Kind::AllGatherV ||
-        fourth.sendBuffer != allGatherVInputData.data() + 1 ||
-        fourth.recvBuffer != allGatherVOutputData.data() + 1 ||
+        fourth.sendBuffer != allGatherVInputData.data() ||
+        fourth.recvBuffer != allGatherVOutputData.data() ||
         fourth.sendBuffer == fourth.recvBuffer || fourth.amount != 2 ||
         fourth.recvCounts != std::vector<int64_t>({2, 2}) ||
         fourth.displacements != std::vector<int64_t>({0, 2}) ||
         fourth.dataType != buddy::runtime::DataType::F32)
       throw std::runtime_error("AllGatherV call was incorrect");
     if (fifth.kind != Event::Kind::ReduceScatter ||
-        fifth.sendBuffer != reduceScatterInputData.data() + 1 ||
-        fifth.recvBuffer != reduceScatterOutputData.data() + 1 ||
+        fifth.sendBuffer != reduceScatterInputData.data() ||
+        fifth.recvBuffer != reduceScatterOutputData.data() ||
         fifth.sendBuffer == fifth.recvBuffer ||
         fifth.recvCounts != std::vector<int64_t>({2, 2}) ||
         fifth.dataType != buddy::runtime::DataType::F32 ||
         fifth.reduction != buddy::runtime::ReductionOp::Sum)
       throw std::runtime_error("ReduceScatter call was incorrect");
+
+    std::array<float, 16> sequenceData = {};
+    FakeCommunicator sequenceCommunicator;
+    buddy::runtime::RaxExecutor sequenceExecutor(manifest,
+                                                 sequenceCommunicator);
+    sequenceExecutor.bindBuffer(1, sequenceData.data());
+    sequenceExecutor.execute("dispatch_collective_dispatch");
+    if (sequenceCommunicator.events.size() != 1 || sequenceData[0] != 10.0f ||
+        sequenceData[1] != 4.0f || sequenceData[2] != 6.0f ||
+        sequenceData[3] != 8.0f)
+      throw std::runtime_error(
+          "raw buffer dispatch/collective/dispatch sequence was incorrect");
 
     auto badAllGatherVCounts = manifest;
     badAllGatherVCounts.functions[1].ops[0].collectiveOperands[0].recvCounts = {
@@ -398,59 +404,41 @@ int main(int argc, char **argv) {
     FakeCommunicator badCountsCommunicator;
     buddy::runtime::RaxExecutor badCountsExecutor(badAllGatherVCounts,
                                                   badCountsCommunicator);
-    badCountsExecutor.bindBuffer(3, &allGatherVInputDescriptor);
-    badCountsExecutor.bindBuffer(4, &allGatherVOutputDescriptor);
+    badCountsExecutor.bindBuffer(3, allGatherVInputData.data());
+    badCountsExecutor.bindBuffer(4, allGatherVOutputData.data());
     expectRuntimeError([&] { badCountsExecutor.execute("all_gather_v"); },
                        "AllGatherV accepted mismatched receive counts");
 
     auto smallAllGatherVOutput = manifest;
     smallAllGatherVOutput.buffers[3].shape = {3};
-    std::array<float, 4> smallAllGatherVOutputData = {};
-    MemRef1DF32 smallAllGatherVOutputDescriptor = {
-        smallAllGatherVOutputData.data(),
-        smallAllGatherVOutputData.data(),
-        1,
-        {3},
-        {1}};
+    std::array<float, 16> smallAllGatherVOutputData = {};
     FakeCommunicator smallOutputCommunicator;
     buddy::runtime::RaxExecutor smallOutputExecutor(smallAllGatherVOutput,
                                                     smallOutputCommunicator);
-    smallOutputExecutor.bindBuffer(3, &allGatherVInputDescriptor);
-    smallOutputExecutor.bindBuffer(4, &smallAllGatherVOutputDescriptor);
+    smallOutputExecutor.bindBuffer(3, allGatherVInputData.data());
+    smallOutputExecutor.bindBuffer(4, smallAllGatherVOutputData.data());
     expectRuntimeError([&] { smallOutputExecutor.execute("all_gather_v"); },
                        "AllGatherV accepted an undersized output buffer");
 
     auto shortReduceScatterInput = manifest;
     shortReduceScatterInput.buffers[4].shape = {3};
-    std::array<float, 4> shortReduceScatterInputData = {};
-    MemRef1DF32 shortReduceScatterInputDescriptor = {
-        shortReduceScatterInputData.data(),
-        shortReduceScatterInputData.data(),
-        1,
-        {3},
-        {1}};
+    std::array<float, 16> shortReduceScatterInputData = {};
     FakeCommunicator shortInputCommunicator;
     buddy::runtime::RaxExecutor shortInputExecutor(shortReduceScatterInput,
                                                    shortInputCommunicator);
-    shortInputExecutor.bindBuffer(5, &shortReduceScatterInputDescriptor);
-    shortInputExecutor.bindBuffer(6, &reduceScatterOutputDescriptor);
+    shortInputExecutor.bindBuffer(5, shortReduceScatterInputData.data());
+    shortInputExecutor.bindBuffer(6, reduceScatterOutputData.data());
     expectRuntimeError([&] { shortInputExecutor.execute("reduce_scatter"); },
                        "ReduceScatter accepted a mismatched input count");
 
     auto shortReduceScatterOutput = manifest;
     shortReduceScatterOutput.buffers[5].shape = {1};
-    std::array<float, 2> shortReduceScatterOutputData = {};
-    MemRef1DF32 shortReduceScatterOutputDescriptor = {
-        shortReduceScatterOutputData.data(),
-        shortReduceScatterOutputData.data(),
-        1,
-        {1},
-        {1}};
+    std::array<float, 16> shortReduceScatterOutputData = {};
     FakeCommunicator shortOutputCommunicator;
     buddy::runtime::RaxExecutor shortOutputExecutor(shortReduceScatterOutput,
                                                     shortOutputCommunicator);
-    shortOutputExecutor.bindBuffer(5, &reduceScatterInputDescriptor);
-    shortOutputExecutor.bindBuffer(6, &shortReduceScatterOutputDescriptor);
+    shortOutputExecutor.bindBuffer(5, reduceScatterInputData.data());
+    shortOutputExecutor.bindBuffer(6, shortReduceScatterOutputData.data());
     expectRuntimeError([&] { shortOutputExecutor.execute("reduce_scatter"); },
                        "ReduceScatter accepted a mismatched output count");
   } catch (const std::exception &error) {

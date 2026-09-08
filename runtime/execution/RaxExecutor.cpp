@@ -11,7 +11,6 @@
 #include <dlfcn.h>
 
 #include <algorithm>
-#include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -37,9 +36,7 @@ RaxExecutor::~RaxExecutor() {
     dlclose(library.second);
 }
 
-void RaxExecutor::bindBuffer(uint32_t id, void *abiPtr) {
-  buffers_[id] = abiPtr;
-}
+void RaxExecutor::bindBuffer(uint32_t id, void *data) { buffers_[id] = data; }
 
 void RaxExecutor::bindConstant(uint32_t id, void *abiPtr) {
   constants_[id] = abiPtr;
@@ -154,54 +151,30 @@ RaxExecutor::resolveHostBuffer(uint32_t bufferId) const {
     throw std::runtime_error("RaxExecutor: unbound buffer ID " +
                              std::to_string(bufferId));
   if (!binding->second)
-    throw std::runtime_error("RaxExecutor: null descriptor for buffer " +
-                             std::to_string(bufferId));
-
-  const char *descriptor = static_cast<const char *>(binding->second);
-  void *aligned = nullptr;
-  int64_t offset = 0;
-  std::memcpy(&aligned, descriptor + sizeof(void *), sizeof(void *));
-  std::memcpy(&offset, descriptor + 2 * sizeof(void *), sizeof(int64_t));
-  if (offset < 0)
-    throw std::runtime_error("RaxExecutor: negative memref offset for buffer " +
+    throw std::runtime_error("RaxExecutor: null data pointer for buffer " +
                              std::to_string(bufferId));
 
   const size_t rank = buffer->shape.size();
-  const size_t sizesOffset = 2 * sizeof(void *) + sizeof(int64_t);
-  const size_t stridesOffset = sizesOffset + rank * sizeof(int64_t);
+  if (!buffer->strides.empty() && buffer->strides.size() != rank)
+    throw std::runtime_error("RaxExecutor: invalid strides for buffer " +
+                             std::to_string(bufferId));
   size_t elementCount = 1;
   size_t expectedStride = 1;
   for (size_t reverseIndex = 0; reverseIndex < rank; ++reverseIndex) {
     const size_t dim = rank - reverseIndex - 1;
     const int64_t staticSize = buffer->shape[dim];
-    int64_t runtimeSize = 0;
-    int64_t runtimeStride = 0;
-    std::memcpy(&runtimeSize, descriptor + sizesOffset + dim * sizeof(int64_t),
-                sizeof(int64_t));
-    std::memcpy(&runtimeStride,
-                descriptor + stridesOffset + dim * sizeof(int64_t),
-                sizeof(int64_t));
     if (staticSize < 0)
       throw std::runtime_error("RaxExecutor: dynamic collective buffer " +
                                std::to_string(bufferId));
-    if (runtimeSize != staticSize)
-      throw std::runtime_error("RaxExecutor: memref size mismatch for buffer " +
-                               std::to_string(bufferId));
-    if (runtimeStride != static_cast<int64_t>(expectedStride))
+    if (!buffer->strides.empty() &&
+        buffer->strides[dim] != static_cast<int64_t>(expectedStride))
       throw std::runtime_error("RaxExecutor: non-contiguous buffer " +
                                std::to_string(bufferId));
     elementCount *= static_cast<size_t>(staticSize);
     expectedStride = elementCount;
   }
   const size_t bytes = elementCount * elementBytes;
-  if (bytes != 0 && !aligned)
-    throw std::runtime_error("RaxExecutor: null aligned pointer for buffer " +
-                             std::to_string(bufferId));
-  void *data = aligned;
-  if (aligned)
-    data = static_cast<void *>(static_cast<char *>(aligned) +
-                               static_cast<size_t>(offset) * elementBytes);
-  return {data, elementCount, bytes, buffer->dtype};
+  return {binding->second, elementCount, bytes, buffer->dtype};
 }
 
 void RaxExecutor::executeDispatch(const ModelManifest::RaxOperation &op) {

@@ -144,8 +144,8 @@ with tempfile.TemporaryDirectory() as temporary:
     tp_forward = compile_pipeline.build_stages(
         "forward", 1, "-mcpu=native", tp_wrapper_out_params=True
     )
-    tp_subgraph = compile_pipeline.build_stages(
-        "subgraph", 1, "-mcpu=native", tp_wrapper_out_params=True
+    standalone_subgraph = compile_pipeline.build_stages(
+        "subgraph", 1, "-mcpu=native"
     )
     out_param_pass = "-buffer-results-to-out-params=hoist-static-allocs"
     public_out_param_pass = (
@@ -155,8 +155,8 @@ with tempfile.TemporaryDirectory() as temporary:
     assert out_param_pass not in default_forward[0][1]
     assert public_out_param_pass not in default_forward[0][1]
     assert tp_forward[0][1][:2] == [out_param_pass, public_out_param_pass]
-    assert out_param_pass in tp_subgraph[2][1]
-    assert public_out_param_pass in tp_subgraph[2][1]
+    assert out_param_pass not in standalone_subgraph[2][1]
+    assert public_out_param_pass not in standalone_subgraph[2][1]
 
     mlir_root = root / "layer_partitioned"
     for rank in range(2):
@@ -173,7 +173,8 @@ with tempfile.TemporaryDirectory() as temporary:
         str(mlir_root), [str(rank0), str(rank1)]
     )
     assert len(entries) == 4
-    assert all(entry[-1] for entry in entries)
+    assert all(entry[-1] for entry in entries if entry[3] == "forward")
+    assert all(not entry[-1] for entry in entries if entry[3] != "forward")
     assert {
         Path(entry[1]).stem for entry in entries if entry[3] == "forward"
     } == {

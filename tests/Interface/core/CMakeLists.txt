@@ -140,6 +140,12 @@ _add_test_executable(buddy-rax-collective-executor-test
   LINK_LIBS
     buddy_runtime_execution
 )
+target_compile_definitions(buddy-rax-collective-executor-test PRIVATE
+  RAX_EXECUTOR_TEST_LIBRARY="$<TARGET_FILE:buddy-rax-executor-test-kernels>"
+)
+add_dependencies(buddy-rax-collective-executor-test
+  buddy-rax-executor-test-kernels
+)
 
 if(BUDDY_RUNTIME_ENABLE_MPI)
   _add_test_executable(buddy-deepseek-r1-rax-runner-test

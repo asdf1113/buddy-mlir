@@ -748,13 +748,16 @@ def tp_runtime_compile_entries(
         else:
             pipeline = "subgraph_decode" if "decode" in graph else "subgraph"
             kind = "subgraph"
+        # An external declaration in a separately compiled wrapper is not
+        # rewritten by buffer-results-to-out-params. Keep reusable subgraph
+        # definitions on the returned-descriptor ABI that declaration uses.
         entries.append(
             (
                 f"{graph}_{kind}_{symbol}",
                 source,
                 f"tp_{graph}_{kind}_{symbol}.o",
                 pipeline,
-                True,
+                is_wrapper,
             )
         )
     if not entries:
@@ -997,8 +1000,8 @@ def main():
         "--tp-wrapper-out-params",
         action="store_true",
         help=(
-            "Convert private TP subgraph and public wrapper memref results "
-            "to caller-provided output arguments (single-file forward mode)"
+            "Convert public TP wrapper memref results to caller-provided "
+            "output arguments (single-file forward mode)"
         ),
     )
     parser.add_argument(
