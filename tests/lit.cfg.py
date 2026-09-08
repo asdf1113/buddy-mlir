@@ -102,11 +102,6 @@ tools = [
     "mlir-runner",
 ]
 
-if "mpi" in config.available_features:
-    tools.append("buddy-deepseek-r1-rax-runner-test")
-if "deepseek-r1-model" in config.available_features:
-    tools.append("buddy-cli")
-
 tools.extend(
     [
         ToolSubst(

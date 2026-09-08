@@ -39,7 +39,6 @@ config.buddy_mlir_enable_dip_lib = "@BUDDY_MLIR_ENABLE_DIP_LIB@"
 config.buddy_mlir_enable_python_packages = "@BUDDY_MLIR_ENABLE_PYTHON_PACKAGES@"
 config.buddy_python_packages_dir = "@BUDDY_MLIR_PYTHON_PACKAGES_DIR@"
 config.buddy_enable_external_dialects = "@BUDDY_ENABLE_EXTERNAL_DIALECTS@"
-config.buddy_build_deepseek_r1_model = "@BUDDY_BUILD_DEEPSEEK_R1_MODEL@"
 config.buddy_runtime_enable_mpi = "@BUDDY_RUNTIME_ENABLE_MPI@"
 config.mpiexec_executable = "@MPIEXEC_EXECUTABLE@"
 config.mpi_numproc_flag = "@MPIEXEC_NUMPROC_FLAG@"
@@ -63,8 +62,6 @@ if str(config.buddy_enable_external_dialects).lower() in ("1", "on", "true", "ye
 
 if str(config.buddy_runtime_enable_mpi).lower() in ("1", "on", "true", "yes"):
     config.available_features.add("mpi")
-if str(config.buddy_build_deepseek_r1_model).lower() in ("1", "on", "true", "yes"):
-    config.available_features.add("deepseek-r1-model")
 
 # Support substitution of the tools_dir with user parameters. This is
 # used when we can't determine the tool dir at configuration time.
