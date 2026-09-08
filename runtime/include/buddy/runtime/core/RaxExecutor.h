@@ -30,7 +30,7 @@ public:
   RaxExecutor(const RaxExecutor &) = delete;
   RaxExecutor &operator=(const RaxExecutor &) = delete;
 
-  void bindBuffer(uint32_t id, void *abiPtr);
+  void bindBuffer(uint32_t id, void *data);
   void bindConstant(uint32_t id, void *abiPtr);
   void execute(const std::string &functionName);
 

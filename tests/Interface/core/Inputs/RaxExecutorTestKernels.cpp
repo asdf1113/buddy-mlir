@@ -12,6 +12,19 @@ extern "C" void kernel_b(void **args) {
   *value *= *factor;
 }
 
+extern "C" void collective_producer(void **args) {
+  auto *data = static_cast<float *>(args[0]);
+  data[0] = 1.0f;
+  data[1] = 2.0f;
+  data[2] = 3.0f;
+  data[3] = 4.0f;
+}
+
+extern "C" void collective_consumer(void **args) {
+  auto *data = static_cast<float *>(args[0]);
+  data[0] += data[3];
+}
+
 extern "C" void deepseek_session_kernel(void **args) {
   auto *parameters = static_cast<int *>(args[0]);
   auto *input = static_cast<int *>(args[1]);
