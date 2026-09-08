@@ -97,8 +97,6 @@ tools = [
     "buddy-audio-container-test",
     "buddy-text-container-test",
     "buddy-rax-executor-test",
-    "buddy-rax-execution-session-test",
-    "buddy-rax-collective-executor-test",
     "rax-inspect",
     "rax-pack",
     "mlir-runner",

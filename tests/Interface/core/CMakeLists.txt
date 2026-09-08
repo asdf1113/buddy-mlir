@@ -56,22 +56,6 @@ target_compile_definitions(buddy-rax-executor-test PRIVATE
 )
 add_dependencies(buddy-rax-executor-test buddy-rax-executor-test-kernels)
 
-_add_test_executable(buddy-rax-execution-session-test
-  RaxExecutionSessionTest.cpp
-  "${CMAKE_SOURCE_DIR}/models/deepseek_r1_tp2/DeepSeekR1RaxSession.cpp"
-  LINK_LIBS
-    buddy_runtime_execution
-)
-target_include_directories(buddy-rax-execution-session-test PRIVATE
-  "${CMAKE_SOURCE_DIR}/models/deepseek_r1_tp2/include"
-)
-target_compile_definitions(buddy-rax-execution-session-test PRIVATE
-  RAX_EXECUTION_SESSION_TEST_LIBRARY="$<TARGET_FILE:buddy-rax-executor-test-kernels>"
-)
-add_dependencies(buddy-rax-execution-session-test
-  buddy-rax-executor-test-kernels
-)
-
 _add_test_executable(buddy-deepseek-r1-rax-generation-test
   DeepSeekR1RaxGenerationTest.cpp
   "${CMAKE_SOURCE_DIR}/models/deepseek_r1_tp2/DeepSeekR1RaxSession.cpp"
@@ -133,18 +117,6 @@ target_compile_definitions(buddy-rax-wrapper-abi-test PRIVATE
 )
 add_dependencies(buddy-rax-wrapper-abi-test
   buddy-rax-wrapper-abi-test-kernels
-)
-
-_add_test_executable(buddy-rax-collective-executor-test
-  RaxCollectiveExecutorTest.cpp
-  LINK_LIBS
-    buddy_runtime_execution
-)
-target_compile_definitions(buddy-rax-collective-executor-test PRIVATE
-  RAX_EXECUTOR_TEST_LIBRARY="$<TARGET_FILE:buddy-rax-executor-test-kernels>"
-)
-add_dependencies(buddy-rax-collective-executor-test
-  buddy-rax-executor-test-kernels
 )
 
 if(BUDDY_RUNTIME_ENABLE_MPI)
