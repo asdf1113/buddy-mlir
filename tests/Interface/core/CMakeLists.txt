@@ -58,12 +58,12 @@ add_dependencies(buddy-rax-executor-test buddy-rax-executor-test-kernels)
 
 _add_test_executable(buddy-rax-execution-session-test
   RaxExecutionSessionTest.cpp
-  "${CMAKE_SOURCE_DIR}/models/deepseek_r1/DeepSeekR1RaxSession.cpp"
+  "${CMAKE_SOURCE_DIR}/models/deepseek_r1_tp2/DeepSeekR1RaxSession.cpp"
   LINK_LIBS
     buddy_runtime_execution
 )
 target_include_directories(buddy-rax-execution-session-test PRIVATE
-  "${CMAKE_SOURCE_DIR}/models/deepseek_r1/include"
+  "${CMAKE_SOURCE_DIR}/models/deepseek_r1_tp2/include"
 )
 target_compile_definitions(buddy-rax-execution-session-test PRIVATE
   RAX_EXECUTION_SESSION_TEST_LIBRARY="$<TARGET_FILE:buddy-rax-executor-test-kernels>"
@@ -74,13 +74,13 @@ add_dependencies(buddy-rax-execution-session-test
 
 _add_test_executable(buddy-deepseek-r1-rax-generation-test
   DeepSeekR1RaxGenerationTest.cpp
-  "${CMAKE_SOURCE_DIR}/models/deepseek_r1/DeepSeekR1RaxSession.cpp"
+  "${CMAKE_SOURCE_DIR}/models/deepseek_r1_tp2/DeepSeekR1RaxSession.cpp"
   LINK_LIBS
     buddy_runtime_execution
     buddy_runtime_llm
 )
 target_include_directories(buddy-deepseek-r1-rax-generation-test PRIVATE
-  "${CMAKE_SOURCE_DIR}/models/deepseek_r1/include"
+  "${CMAKE_SOURCE_DIR}/models/deepseek_r1_tp2/include"
 )
 target_compile_definitions(buddy-deepseek-r1-rax-generation-test PRIVATE
   DEEPSEEK_RAX_GENERATION_TEST_LIBRARY="$<TARGET_FILE:buddy-rax-executor-test-kernels>"
@@ -150,14 +150,14 @@ add_dependencies(buddy-rax-collective-executor-test
 if(BUDDY_RUNTIME_ENABLE_MPI)
   _add_test_executable(buddy-deepseek-r1-rax-runner-test
     DeepSeekR1RaxRunnerTest.cpp
-    "${CMAKE_SOURCE_DIR}/models/deepseek_r1/DeepSeekR1RaxRunner.cpp"
-    "${CMAKE_SOURCE_DIR}/models/deepseek_r1/DeepSeekR1RaxSession.cpp"
+    "${CMAKE_SOURCE_DIR}/models/deepseek_r1_tp2/DeepSeekR1RaxRunner.cpp"
+    "${CMAKE_SOURCE_DIR}/models/deepseek_r1_tp2/DeepSeekR1RaxSession.cpp"
     LINK_LIBS
       buddy_runtime_execution
       buddy_runtime_mpi
   )
   target_include_directories(buddy-deepseek-r1-rax-runner-test PRIVATE
-    "${CMAKE_SOURCE_DIR}/models/deepseek_r1/include"
+    "${CMAKE_SOURCE_DIR}/models/deepseek_r1_tp2/include"
   )
   target_compile_definitions(buddy-deepseek-r1-rax-runner-test PRIVATE
     DEEPSEEK_RAX_RUNNER_TEST_LIBRARY="$<TARGET_FILE:buddy-rax-executor-test-kernels>"
