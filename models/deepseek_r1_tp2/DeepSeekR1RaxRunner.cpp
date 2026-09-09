@@ -13,7 +13,6 @@
 
 #include <mpi.h>
 
-#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -30,13 +29,8 @@ void checkMpi(int status, const char *operation) {
 
 } // namespace
 
-void runDeepSeekR1Rax(const std::string &raxPath, int tensorParallelSize,
+void runDeepSeekR1Rax(const std::string &raxPath,
                       const DeepSeekR1RaxSessionCallback &callback) {
-  namespace fs = std::filesystem;
-
-  if (tensorParallelSize <= 1)
-    throw std::runtime_error(
-        "DeepSeekR1RaxRunner requires tensor parallel size greater than one");
   if (raxPath.empty())
     throw std::runtime_error("DeepSeekR1RaxRunner requires a RAX artifact");
 
@@ -55,27 +49,14 @@ void runDeepSeekR1Rax(const std::string &raxPath, int tensorParallelSize,
     MpiCommunicator communicator(MPI_COMM_WORLD);
     const int rank = communicator.rank();
     const int worldSize = communicator.size();
-    if (worldSize != tensorParallelSize)
+    if (worldSize != 2)
       throw std::runtime_error("DeepSeekR1RaxRunner: MPI world size " +
-                               std::to_string(worldSize) +
-                               " does not match tensor parallel size " +
-                               std::to_string(tensorParallelSize));
-
-    fs::path artifactPath = fs::absolute(fs::path(raxPath));
-    const fs::path artifactDirectory = fs::is_directory(artifactPath)
-                                           ? artifactPath
-                                           : artifactPath.parent_path();
-    const fs::path rankRax =
-        artifactDirectory / ("rank" + std::to_string(rank) + ".rax");
-    if (!fs::is_regular_file(rankRax))
-      throw std::runtime_error("DeepSeekR1RaxRunner: rank-local artifact not "
-                               "found: " +
-                               rankRax.string());
+                               std::to_string(worldSize) + "; expected 2");
 
     std::cerr << "DeepSeek RAX rank " << rank << '/' << worldSize << ": "
-              << rankRax.string() << '\n';
+              << raxPath << '\n';
 
-    DeepSeekR1RaxSession session(rankRax.string(), communicator);
+    DeepSeekR1RaxSession session(raxPath, communicator);
     callback(session, rank);
   } catch (...) {
     if (ownsMpi)

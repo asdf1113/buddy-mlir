@@ -66,11 +66,6 @@ struct RunConfig {
   /// Runtime batch size override. 0 means use the packaged model default.
   int batchSize = 0;
 
-  /// Tensor-parallel world size. Values greater than one opt supported model
-  /// runners into rank-local RAX execution. The default preserves the regular
-  /// single-process model path.
-  int tensorParallelSize = 1;
-
   /// Optional image input for vision-language models (ignored by text models).
   /// May be an image path or a pre-processed pixel_values blob, per the runner.
   std::string imagePath;

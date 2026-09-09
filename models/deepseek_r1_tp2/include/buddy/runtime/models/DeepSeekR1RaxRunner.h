@@ -21,9 +21,8 @@ using DeepSeekR1RaxSessionCallback =
     std::function<void(DeepSeekR1RaxSession &, int rank)>;
 
 /// Run a callback while the rank-local RAX session and MPI world are alive.
-/// The input path locates the artifact directory; each process opens
-/// rank<mpi-rank>.rax from that directory.
-void runDeepSeekR1Rax(const std::string &raxPath, int tensorParallelSize,
+/// Each process opens the supplied rank-local RAX path.
+void runDeepSeekR1Rax(const std::string &raxPath,
                       const DeepSeekR1RaxSessionCallback &callback);
 
 } // namespace runtime

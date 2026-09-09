@@ -287,18 +287,18 @@ struct DeepSeekR1RaxSession::Impl {
     const auto *decode = function("forward_decode");
     if (!prefill || !decode || decode->inputs.empty() ||
         (decode->inputs.size() - 1) % 3 != 0)
-      return 0;
+      throw std::runtime_error(
+          "DeepSeekR1RaxSession: incompatible DeepSeek KV-cache contract");
     const size_t layers = (decode->inputs.size() - 1) / 3;
-    if (prefill->outputs.size() != 2 * layers + 1 ||
+    if (layers == 0 || prefill->outputs.size() != 2 * layers + 1 ||
         decode->outputs.size() != 3 * layers + 1)
-      return 0;
+      throw std::runtime_error(
+          "DeepSeekR1RaxSession: incompatible DeepSeek KV-cache contract");
     return layers;
   }
 
   void copyPrefillKVCacheToDecodeInputs() {
     const size_t layers = deepSeekKVLayerCount();
-    if (layers == 0)
-      return;
     const auto *prefill = function("forward_prefill");
     const auto *decode = function("forward_decode");
     for (size_t layer = 0; layer < layers; ++layer) {
@@ -310,8 +310,6 @@ struct DeepSeekR1RaxSession::Impl {
 
   void copyDecodeKVCacheToInputs() {
     const size_t layers = deepSeekKVLayerCount();
-    if (layers == 0)
-      return;
     const auto *decode = function("forward_decode");
     for (size_t layer = 0; layer < layers; ++layer) {
       copyBuffer(decode->outputs[3 * layer + 1], decode->inputs[3 * layer + 2]);

@@ -31,19 +31,15 @@ namespace buddy {
 namespace runtime {
 namespace {
 
-static constexpr int kTensorParallelSize = 2;
 static constexpr int kEosToken = 151643; // <|end▁of▁sentence|>
 static constexpr int kEotToken = 151647; // <|EOT|>
 
 } // namespace
 
 void DeepSeekR1TPRunner::run(const RunConfig &cfg) {
-  if (cfg.tensorParallelSize != kTensorParallelSize)
-    throw std::runtime_error(
-        "DeepSeek R1 TP runner requires --tensor-parallel-size 2");
   if (cfg.raxPath.empty())
     throw std::runtime_error(
-        "DeepSeek R1 TP runner requires --model <rank0.rax>");
+        "DeepSeek R1 TP runner requires --model <rank-local.rax>");
   if (cfg.interactive)
     throw std::runtime_error(
         "DeepSeek R1 tensor-parallel interactive mode is not supported");
@@ -76,51 +72,48 @@ void DeepSeekR1TPRunner::run(const RunConfig &cfg) {
   codec.maxTokenLen = BUDDY_DSR1_MAX_TOKEN_LEN;
   buddy::Sampler sampler(samplerConfig);
 
-  runDeepSeekR1Rax(
-      cfg.raxPath, cfg.tensorParallelSize,
-      [&](DeepSeekR1RaxSession &session, int rank) {
-        const ModelManifest &manifest = session.manifest();
-        const std::string vocabPath =
-            manifest.vocabPath.empty()
-                ? (std::filesystem::path(manifest.soPath).parent_path() /
-                   "vocab.txt")
-                      .string()
-                : manifest.vocabPath;
-        const bool emitOutput = rank == 0;
-        const bool suppress =
-            cfg.suppressStats || cfg.streamJsonl || !emitOutput;
+  runDeepSeekR1Rax(cfg.raxPath, [&](DeepSeekR1RaxSession &session, int rank) {
+    const ModelManifest &manifest = session.manifest();
+    const std::string vocabPath =
+        manifest.vocabPath.empty()
+            ? (std::filesystem::path(manifest.soPath).parent_path() /
+               "vocab.txt")
+                  .string()
+            : manifest.vocabPath;
+    const bool emitOutput = rank == 0;
+    const bool suppress = cfg.suppressStats || cfg.streamJsonl || !emitOutput;
 
-        if (!suppress) {
-          std::cerr << "\033[33;1mDeepSeekR1 TP=2 Inference (buddy-cli / "
-                       "BuddyRuntime)\033[0m\n";
-          printLog("Manifest: " + cfg.raxPath, false);
-          printLog("  .so     = " + manifest.soPath, false);
-          for (const auto &path : manifest.weightPaths)
-            printLog("  weights = " + path, false);
-          printLog("  vocab   = " + vocabPath, false);
-        }
+    if (!suppress) {
+      std::cerr << "\033[33;1mDeepSeekR1 TP=2 Inference (buddy-cli / "
+                   "BuddyRuntime)\033[0m\n";
+      printLog("Manifest: " + cfg.raxPath, false);
+      printLog("  .so     = " + manifest.soPath, false);
+      for (const auto &path : manifest.weightPaths)
+        printLog("  weights = " + path, false);
+      printLog("  vocab   = " + vocabPath, false);
+    }
 
-        session.loadWeights(manifest.weightPaths);
-        printLog("Weights loaded.", suppress);
-        printLog("Vocab: " + vocabPath, suppress);
-        printLog("KV cache: " + std::to_string(BUDDY_DSR1_KV_LAYERS) +
-                     " x {1," + std::to_string(BUDDY_DSR1_HEAD_NUM) + "," +
-                     std::to_string(BUDDY_DSR1_MAX_TOKEN_LEN) + "," +
-                     std::to_string(BUDDY_DSR1_HIDDEN_SIZE) + "} f32",
-                 suppress);
+    session.loadWeights(manifest.weightPaths);
+    printLog("Weights loaded.", suppress);
+    printLog("Vocab: " + vocabPath, suppress);
+    printLog("KV cache: " + std::to_string(BUDDY_DSR1_KV_LAYERS) + " x {1," +
+                 std::to_string(BUDDY_DSR1_HEAD_NUM) + "," +
+                 std::to_string(BUDDY_DSR1_MAX_TOKEN_LEN) + "," +
+                 std::to_string(BUDDY_DSR1_HIDDEN_SIZE) + "} f32",
+             suppress);
 
-        std::string finalPrompt = cfg.prompt;
-        if (chatTemplate) {
-          std::vector<buddy::Message> messages = {{"user", cfg.prompt}};
-          finalPrompt = chatTemplate->apply(messages);
-        }
+    std::string finalPrompt = cfg.prompt;
+    if (chatTemplate) {
+      std::vector<buddy::Message> messages = {{"user", cfg.prompt}};
+      finalPrompt = chatTemplate->apply(messages);
+    }
 
-        GenerationResult result = runGeneration(
-            finalPrompt, session, vocabPath, cfg.maxNewTokens, stopTokenIds,
-            sampler, codec, suppress, cfg.streamJsonl, emitOutput);
-        if (!suppress)
-          printStats(result, /*verbose=*/true);
-      });
+    GenerationResult result = runGeneration(
+        finalPrompt, session, vocabPath, cfg.maxNewTokens, stopTokenIds,
+        sampler, codec, suppress, cfg.streamJsonl, emitOutput);
+    if (!suppress)
+      printStats(result, /*verbose=*/true);
+  });
 }
 
 } // namespace runtime
