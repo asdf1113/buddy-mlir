@@ -50,15 +50,7 @@ for candidate in openmp_runtime_candidates:
 config.openmp_runtime_dir = openmp_runtime_dir
 config.substitutions.append(("%openmp_runtime_dir", config.openmp_runtime_dir))
 
-if "mpi" in config.available_features:
-    config.substitutions.append(("%mpiexec", config.mpiexec_executable))
-    config.substitutions.append(("%mpi_numproc_flag", config.mpi_numproc_flag))
-    config.substitutions.append(("%mpi_preflags", config.mpi_preflags))
-    config.substitutions.append(("%mpi_postflags", config.mpi_postflags))
-
-llvm_config.with_system_environment(
-    ["HOME", "INCLUDE", "LIB", "TMP", "TEMP", "FI_PROVIDER"]
-)
+llvm_config.with_system_environment(["HOME", "INCLUDE", "LIB", "TMP", "TEMP"])
 
 llvm_config.use_default_substitutions()
 

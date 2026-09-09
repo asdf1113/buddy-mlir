@@ -554,9 +554,13 @@ int main(int argc, char **argv) {
                 record.root = *collective.getRoot();
               } else if (collective.getKind() == "all_gatherv") {
                 record.kind = CollectiveKind_AllGatherV;
-              } else {
+              } else if (collective.getKind() == "reduce_scatter") {
                 record.kind = CollectiveKind_ReduceScatter;
                 record.reduction = ReductionKind_Sum;
+              } else {
+                throw std::runtime_error("rhal.func @" + r.name +
+                                         ": unsupported collective kind '" +
+                                         collective.getKind().str() + "'");
               }
               for (auto buffer : collective.getBuffers())
                 record.inputBuffers.push_back(
