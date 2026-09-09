@@ -36,6 +36,7 @@
 #endif
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
@@ -521,6 +522,40 @@ int main(int argc, char **argv) {
     std::cout << "Prompt: ";
     std::getline(std::cin, prompt);
     std::cout << "\n";
+  }
+
+  // In tensor-parallel mode, --model <rank0.rax> is the artifact-family
+  // anchor. Resolve the rank-local RAX before the first manifest load so each
+  // MPI process only opens its own rankN.rax.
+  if (tensorParallelSize > 1) {
+    const char *rankEnv = std::getenv("PMI_RANK");
+    if (!rankEnv) {
+      std::cerr << "\033[31;1m[Error]\033[0m "
+                   "--tensor-parallel-size requires PMI_RANK; launch "
+                   "buddy-cli with mpiexec.\n";
+      return 2;
+    }
+
+    int rank = 0;
+    try {
+      rank = std::stoi(rankEnv);
+    } catch (const std::exception &) {
+      std::cerr << "\033[31;1m[Error]\033[0m invalid PMI_RANK: " << rankEnv
+                << "\n";
+      return 2;
+    }
+
+    if (rank < 0 || rank >= tensorParallelSize) {
+      std::cerr << "\033[31;1m[Error]\033[0m PMI_RANK " << rank
+                << " is outside tensor-parallel world size "
+                << tensorParallelSize << ".\n";
+      return 2;
+    }
+
+    const std::filesystem::path anchorPath(raxPath);
+    raxPath =
+        (anchorPath.parent_path() / ("rank" + std::to_string(rank) + ".rax"))
+            .string();
   }
 
   // ── Determine model type ─────────────────────────────────────────────────
